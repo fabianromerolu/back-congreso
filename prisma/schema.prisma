@@ -1,0 +1,97 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Ponente {
+  id                     String   @id @default(uuid())
+
+  nombres                String
+  apellidos              String
+  tipoDocumento          String
+  documento              String
+  email                  String
+  telefono               String
+
+  pais                   String
+  ciudad                 String
+
+  institucion            String
+  universidad             String
+
+  programa               String
+  semestre               String
+
+  tituloPonencia         String
+  resumen                String
+  lineaTematica          String
+
+  // 📎 URLs Cloudinary
+  ponenciaPdfUrl         String
+  cesionDerechosPdfUrl   String
+
+  createdAt              DateTime @default(now())
+
+  @@map("ponentes")
+}
+
+model Evaluador {
+  id                     String   @id @default(uuid())
+
+  nombres                String
+  apellidos              String
+  tipoDocumento          String
+  documento              String
+  email                  String
+  telefono               String
+
+  pais                   String
+  ciudad                 String
+
+  institucion            String
+  universidad             String
+
+  programa               String
+  semestre               String
+
+  profesion              String
+  posgrado               String
+  universidadPosgrado    String
+  esDocente              String
+  programaDocencia       String?
+
+  // ✍️ URL firma Cloudinary
+  firmaDigitalUrl        String
+
+  createdAt              DateTime @default(now())
+
+  @@map("evaluadores")
+}
+
+model Asistente {
+  id                     String   @id @default(uuid())
+
+  nombres                String
+  apellidos              String
+  tipoDocumento          String
+  documento              String
+  email                  String
+  telefono               String
+
+  pais                   String
+  ciudad                 String
+
+  institucion            String
+  universidad             String
+
+  programa               String
+  semestre               String
+
+  createdAt              DateTime @default(now())
+
+  @@map("asistentes")
+}
