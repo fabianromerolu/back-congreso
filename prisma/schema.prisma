@@ -8,90 +8,144 @@ datasource db {
 }
 
 model Ponente {
-  id                     String   @id @default(uuid())
+  id            String   @id @default(uuid())
 
-  nombres                String
-  apellidos              String
-  tipoDocumento          String
-  documento              String
-  email                  String
-  telefono               String
+  // Ponente 1 (obligatorio)
+  nombres       String
+  apellidos     String
+  tipoDocumento String
+  documento     String
+  email         String
+  telefono      String
 
-  pais                   String
-  ciudad                 String
+  // Ponente 2 (opcional)
+  nombres2       String?
+  apellidos2     String?
+  tipoDocumento2 String?
+  documento2     String?
+  email2         String?
+  telefono2      String?
 
-  institucion            String
-  universidad             String
+  pais          String
+  ciudad        String
 
-  programa               String
-  semestre               String
+  institucion   String
+  universidad   String
 
-  tituloPonencia         String
-  resumen                String
-  lineaTematica          String
+  programa      String
+  semestre      String
 
-  // 📎 URLs Cloudinary
-  ponenciaPdfUrl         String
-  cesionDerechosPdfUrl   String
+  // Nuevos opcionales
+  grupoInvestigacion String?
+  semillero          String?
 
-  createdAt              DateTime @default(now())
+  tituloPonencia String
+  resumen        String
+  lineaTematica  String
+
+  // URLs Cloudinary (siguen igual)
+  ponenciaPdfUrl       String
+  cesionDerechosPdfUrl String
+
+  // Estados
+  verificado Boolean @default(false)
+  agendado   Boolean @default(false)
+
+  // Agenda (múltiples franjas)
+  agenda     PonenteAgenda[]
+
+  createdAt  DateTime @default(now())
 
   @@map("ponentes")
 }
 
+model PonenteAgenda {
+  id        String   @id @default(uuid())
+  ponenteId String
+  ponente   Ponente  @relation(fields: [ponenteId], references: [id], onDelete: Cascade)
+
+  fecha     DateTime // guardamos fecha (00:00)
+  inicio    String   // "14:00"
+  fin       String   // "18:00"
+
+  createdAt DateTime @default(now())
+
+  @@index([ponenteId])
+  @@map("ponentes_agenda")
+}
+
 model Evaluador {
-  id                     String   @id @default(uuid())
+  id            String   @id @default(uuid())
 
-  nombres                String
-  apellidos              String
-  tipoDocumento          String
-  documento              String
-  email                  String
-  telefono               String
+  nombres       String
+  apellidos     String
+  tipoDocumento String
+  documento     String
+  email         String
+  telefono      String
 
-  pais                   String
-  ciudad                 String
+  pais          String
+  ciudad        String
 
-  institucion            String
-  universidad             String
+  institucion   String
+  universidad   String
 
-  programa               String
-  semestre               String
+  programa      String
+  semestre      String
 
-  profesion              String
-  posgrado               String
-  universidadPosgrado    String
-  esDocente              String
-  programaDocencia       String?
+  profesion           String
+  posgrado            String
+  universidadPosgrado String
+  esDocente           String
+  programaDocencia    String?
 
-  // ✍️ URL firma Cloudinary
-  firmaDigitalUrl        String
+  // Estados
+  verificado Boolean @default(false)
+  agendado   Boolean @default(false)
 
-  createdAt              DateTime @default(now())
+  // Agenda (múltiples franjas)
+  agenda     EvaluadorAgenda[]
+
+  createdAt  DateTime @default(now())
 
   @@map("evaluadores")
 }
 
+model EvaluadorAgenda {
+  id         String   @id @default(uuid())
+  evaluadorId String
+  evaluador   Evaluador @relation(fields: [evaluadorId], references: [id], onDelete: Cascade)
+
+  fecha     DateTime
+  inicio    String
+  fin       String
+
+  createdAt DateTime @default(now())
+
+  @@index([evaluadorId])
+  @@map("evaluadores_agenda")
+}
+
 model Asistente {
-  id                     String   @id @default(uuid())
+  id            String   @id @default(uuid())
 
-  nombres                String
-  apellidos              String
-  tipoDocumento          String
-  documento              String
-  email                  String
-  telefono               String
+  nombres       String
+  apellidos     String
+  tipoDocumento String
+  documento     String
+  email         String
+  telefono      String
 
-  pais                   String
-  ciudad                 String
+  pais          String
+  ciudad        String
 
-  institucion            String
-  universidad             String
+  institucion   String
+  universidad   String
 
-  programa               String
-  semestre               String
+  programa      String
+  semestre      String
 
-  createdAt              DateTime @default(now())
+  createdAt     DateTime @default(now())
 
   @@map("asistentes")
 }

@@ -1,6 +1,6 @@
-import { Body, Controller, Post, UploadedFile, UploadedFiles, UseInterceptors } from "@nestjs/common";
+import { Body, Controller, Post, UploadedFiles, UseInterceptors } from "@nestjs/common";
 import { ApiConsumes, ApiTags } from "@nestjs/swagger";
-import { FileFieldsInterceptor, FileInterceptor } from "@nestjs/platform-express";
+import { FileFieldsInterceptor } from "@nestjs/platform-express";
 import { memoryStorage } from "multer";
 
 import { CreatePonenteDto } from "../ponentes/dto/create-ponente.dto";
@@ -47,13 +47,10 @@ export class InscripcionesController {
     return { ok: true };
   }
 
+  // ✅ ya no multipart
   @Post("evaluador")
-  @ApiConsumes("multipart/form-data")
-  @UseInterceptors(
-    FileInterceptor("firmaDigitalPng", { storage: memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }),
-  )
-  async evaluador(@Body() dto: CreateEvaluadorDto, @UploadedFile() file?: Express.Multer.File) {
-    await this.evaluadores.create(dto, file);
+  async evaluador(@Body() dto: CreateEvaluadorDto) {
+    await this.evaluadores.create(dto);
     return { ok: true };
   }
 }
