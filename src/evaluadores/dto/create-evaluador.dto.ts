@@ -1,5 +1,5 @@
 import { ApiProperty } from "@nestjs/swagger";
-import { IsEmail, IsIn, IsNotEmpty, IsOptional, IsString, Length } from "class-validator";
+import { IsEmail, IsIn, IsNotEmpty, IsOptional, IsString, Length, ValidateIf } from "class-validator";
 
 const DOC_TYPES = ["CC", "TI", "CE", "PAS"] as const;
 const ES_DOCENTE = ["si", "no"] as const;
@@ -29,17 +29,11 @@ export class CreateEvaluadorDto {
   @ApiProperty() @IsString() @IsNotEmpty()
   ciudad!: string;
 
-  @ApiProperty() @IsString() @IsNotEmpty()
-  institucion!: string;
-
-  @ApiProperty() @IsString() @IsNotEmpty()
+  // pregrado
+  @ApiProperty({ description: "Universidad donde cursó el pregrado" })
+  @IsString()
+  @IsNotEmpty()
   universidad!: string;
-
-  @ApiProperty() @IsString() @IsNotEmpty()
-  programa!: string;
-
-  @ApiProperty() @IsString() @IsNotEmpty()
-  semestre!: string;
 
   @ApiProperty() @IsString() @IsNotEmpty()
   profesion!: string;
@@ -53,6 +47,16 @@ export class CreateEvaluadorDto {
   @ApiProperty({ enum: ES_DOCENTE }) @IsIn(ES_DOCENTE as unknown as string[])
   esDocente!: string;
 
-  @ApiProperty({ required: false }) @IsOptional() @IsString()
+  // Solo si es docente
+  @ApiProperty({ required: false })
+  @ValidateIf((o) => o.esDocente === "si")
+  @IsString()
+  @IsNotEmpty()
   programaDocencia?: string;
+
+  @ApiProperty({ required: false, description: "Universidad donde trabaja como docente" })
+  @ValidateIf((o) => o.esDocente === "si")
+  @IsString()
+  @IsNotEmpty()
+  universidadDocencia?: string;
 }

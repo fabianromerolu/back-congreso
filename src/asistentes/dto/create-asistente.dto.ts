@@ -1,5 +1,5 @@
 import { ApiProperty } from "@nestjs/swagger";
-import { IsEmail, IsIn, IsNotEmpty, IsString, Length } from "class-validator";
+import { IsEmail, IsIn, IsNotEmpty, IsOptional, IsString, Length } from "class-validator";
 
 const DOC_TYPES = ["CC", "TI", "CE", "PAS"] as const;
 
@@ -28,15 +28,13 @@ export class CreateAsistenteDto {
   @ApiProperty() @IsString() @IsNotEmpty()
   ciudad!: string;
 
-  @ApiProperty() @IsString() @IsNotEmpty()
-  institucion!: string;
+  // opcionales
+  @ApiProperty({ required: false }) @IsOptional() @IsString()
+  universidad?: string;
 
-  @ApiProperty() @IsString() @IsNotEmpty()
-  universidad!: string;
+  @ApiProperty({ required: false }) @IsOptional() @IsString()
+  programa?: string;
 
-  @ApiProperty() @IsString() @IsNotEmpty()
-  programa!: string;
-
-  @ApiProperty() @IsString() @IsNotEmpty()
-  semestre!: string;
+  @ApiProperty({ required: false }) @IsOptional() @IsString()
+  semestre?: string;
 }

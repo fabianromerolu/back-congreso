@@ -50,19 +50,17 @@ export class CreatePonenteDto {
   @ApiProperty() @IsString() @IsNotEmpty()
   ciudad!: string;
 
-  @ApiProperty() @IsString() @IsNotEmpty()
-  institucion!: string;
+  // Académico (opcional)
+  @ApiProperty({ required: false }) @IsOptional() @IsString()
+  universidad?: string;
 
-  @ApiProperty() @IsString() @IsNotEmpty()
-  universidad!: string;
+  @ApiProperty({ required: false }) @IsOptional() @IsString()
+  programa?: string;
 
-  @ApiProperty() @IsString() @IsNotEmpty()
-  programa!: string;
+  @ApiProperty({ required: false }) @IsOptional() @IsString()
+  semestre?: string;
 
-  @ApiProperty() @IsString() @IsNotEmpty()
-  semestre!: string;
-
-  // Nuevos opcionales
+  // Opcionales
   @ApiProperty({ required: false }) @IsOptional() @IsString()
   grupoInvestigacion?: string;
 

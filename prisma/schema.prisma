@@ -29,13 +29,12 @@ model Ponente {
   pais          String
   ciudad        String
 
-  institucion   String
-  universidad   String
+  // Académico (opcional — puede ser profesional)
+  universidad   String?
+  programa      String?
+  semestre      String?
 
-  programa      String
-  semestre      String
-
-  // Nuevos opcionales
+  // Opcionales
   grupoInvestigacion String?
   semillero          String?
 
@@ -43,7 +42,7 @@ model Ponente {
   resumen        String
   lineaTematica  String
 
-  // URLs Cloudinary (siguen igual)
+  // URLs Cloudinary
   ponenciaPdfUrl       String
   cesionDerechosPdfUrl String
 
@@ -87,23 +86,23 @@ model Evaluador {
   pais          String
   ciudad        String
 
-  institucion   String
-  universidad   String
-
-  programa      String
-  semestre      String
+  // Pregrado
+  universidad   String  // universidad del pregrado
 
   profesion           String
   posgrado            String
   universidadPosgrado String
-  esDocente           String
+
+  // Docencia (condicional)
+  esDocente           String  // "si" | "no"
   programaDocencia    String?
+  universidadDocencia String?
 
   // Estados
   verificado Boolean @default(false)
   agendado   Boolean @default(false)
 
-  // Agenda (múltiples franjas)
+  // Agenda
   agenda     EvaluadorAgenda[]
 
   createdAt  DateTime @default(now())
@@ -112,7 +111,7 @@ model Evaluador {
 }
 
 model EvaluadorAgenda {
-  id         String   @id @default(uuid())
+  id          String    @id @default(uuid())
   evaluadorId String
   evaluador   Evaluador @relation(fields: [evaluadorId], references: [id], onDelete: Cascade)
 
@@ -139,11 +138,10 @@ model Asistente {
   pais          String
   ciudad        String
 
-  institucion   String
-  universidad   String
-
-  programa      String
-  semestre      String
+  // opcional: si aplica (estudiante/docente)
+  universidad   String?
+  programa      String?
+  semestre      String?
 
   createdAt     DateTime @default(now())
 
