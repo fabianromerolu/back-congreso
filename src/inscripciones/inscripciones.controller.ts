@@ -1,3 +1,4 @@
+//src/inscripciones/inscripciones.controller.ts
 import { Body, Controller, Post, UploadedFiles, UseInterceptors } from "@nestjs/common";
 import { ApiConsumes, ApiTags } from "@nestjs/swagger";
 import { FileFieldsInterceptor } from "@nestjs/platform-express";

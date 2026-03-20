@@ -1,3 +1,4 @@
+//src/ponentes/ponentes.controller.ts
 import { Body, Controller, Get, Param, Patch, Post, UploadedFiles, UseInterceptors } from "@nestjs/common";
 import { FileFieldsInterceptor } from "@nestjs/platform-express";
 import { memoryStorage } from "multer";

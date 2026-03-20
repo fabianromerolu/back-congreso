@@ -6,6 +6,7 @@ import { PonentesModule } from "./ponentes/ponentes.module";
 import { EvaluadoresModule } from "./evaluadores/evaluadores.module";
 import { AsistentesModule } from "./asistentes/asistentes.module";
 import { Module } from "@nestjs/common";
+import { AdministracionModule } from "./administracion/administracion.module";
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -15,6 +16,7 @@ import { Module } from "@nestjs/common";
     EvaluadoresModule,
     AsistentesModule,
     InscripcionesModule,
+    AdministracionModule,
   ],
 })
 export class AppModule {}

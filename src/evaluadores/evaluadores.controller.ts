@@ -1,3 +1,4 @@
+//src/evaluadores/evaluadores.controller.ts
 import { Body, Controller, Get, Param, Patch, Post } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { CreateEvaluadorDto } from "./dto/create-evaluador.dto";

@@ -1,3 +1,4 @@
+//src/asistentes/asistentes.controller.ts
 import { Body, Controller, Get, Post } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { CreateAsistenteDto } from "./dto/create-asistente.dto";

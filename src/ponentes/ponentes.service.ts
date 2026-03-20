@@ -3,6 +3,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { CloudinaryService } from "../cloudinary/cloudinary.service";
 import { CreatePonenteDto } from "./dto/create-ponente.dto";
 import type { Express } from "express";
+import { sanitizeDeep } from "../common/utils/normalizer";
 
 @Injectable()
 export class PonentesService {
@@ -21,7 +22,9 @@ export class PonentesService {
     if (!ponencia) throw new BadRequestException("Falta archivoPonenciaPdf (PDF).");
     if (!cesion) throw new BadRequestException("Falta cesionDerechosPdf (PDF).");
 
+    const cleanDto = sanitizeDeep(dto);
     const folder = "congreso/ponentes";
+
     const [upPonencia, upCesion] = await Promise.all([
       this.cloudinary.uploadPdf(ponencia.buffer, ponencia.originalname, folder),
       this.cloudinary.uploadPdf(cesion.buffer, cesion.originalname, folder),
@@ -29,7 +32,7 @@ export class PonentesService {
 
     return this.prisma.ponente.create({
       data: {
-        ...dto,
+        ...cleanDto,
         ponenciaPdfUrl: upPonencia.secure_url,
         cesionDerechosPdfUrl: upCesion.secure_url,
       },

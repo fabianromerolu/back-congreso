@@ -10,7 +10,6 @@ datasource db {
 model Ponente {
   id            String   @id @default(uuid())
 
-  // Ponente 1 (obligatorio)
   nombres       String
   apellidos     String
   tipoDocumento String
@@ -18,7 +17,6 @@ model Ponente {
   email         String
   telefono      String
 
-  // Ponente 2 (opcional)
   nombres2       String?
   apellidos2     String?
   tipoDocumento2 String?
@@ -29,12 +27,10 @@ model Ponente {
   pais          String
   ciudad        String
 
-  // Académico (opcional — puede ser profesional)
   universidad   String?
   programa      String?
   semestre      String?
 
-  // Opcionales
   grupoInvestigacion String?
   semillero          String?
 
@@ -42,19 +38,23 @@ model Ponente {
   resumen        String
   lineaTematica  String
 
-  // URLs Cloudinary
   ponenciaPdfUrl       String
   cesionDerechosPdfUrl String
 
-  // Estados
   verificado Boolean @default(false)
   agendado   Boolean @default(false)
 
-  // Agenda (múltiples franjas)
-  agenda     PonenteAgenda[]
+  agenda        PonenteAgenda[]
+  asignaciones  PonenteEvaluador[]
+  evaluaciones  PonenciaEvaluacion[]
+  programaciones ProgramacionPonencia[]
 
   createdAt  DateTime @default(now())
 
+  @@index([documento])
+  @@index([email])
+  @@index([universidad])
+  @@index([lineaTematica])
   @@map("ponentes")
 }
 
@@ -63,9 +63,9 @@ model PonenteAgenda {
   ponenteId String
   ponente   Ponente  @relation(fields: [ponenteId], references: [id], onDelete: Cascade)
 
-  fecha     DateTime // guardamos fecha (00:00)
-  inicio    String   // "14:00"
-  fin       String   // "18:00"
+  fecha     DateTime
+  inicio    String
+  fin       String
 
   createdAt DateTime @default(now())
 
@@ -86,27 +86,30 @@ model Evaluador {
   pais          String
   ciudad        String
 
-  // Pregrado
-  universidad   String  // universidad del pregrado
+  universidad   String
 
   profesion           String
   posgrado            String
   universidadPosgrado String
 
-  // Docencia (condicional)
-  esDocente           String  // "si" | "no"
+  esDocente           String
   programaDocencia    String?
   universidadDocencia String?
 
-  // Estados
   verificado Boolean @default(false)
   agendado   Boolean @default(false)
 
-  // Agenda
-  agenda     EvaluadorAgenda[]
+  agenda        EvaluadorAgenda[]
+  asignaciones  PonenteEvaluador[]
+  evaluaciones  PonenciaEvaluacion[]
 
   createdAt  DateTime @default(now())
 
+  @@index([documento])
+  @@index([email])
+  @@index([universidad])
+  @@index([universidadPosgrado])
+  @@index([universidadDocencia])
   @@map("evaluadores")
 }
 
@@ -138,12 +141,96 @@ model Asistente {
   pais          String
   ciudad        String
 
-  // opcional: si aplica (estudiante/docente)
   universidad   String?
   programa      String?
   semestre      String?
 
   createdAt     DateTime @default(now())
 
+  @@index([documento])
+  @@index([email])
+  @@index([universidad])
   @@map("asistentes")
+}
+
+model PonenteEvaluador {
+  id          String    @id @default(uuid())
+
+  ponenteId   String
+  evaluadorId String
+
+  activo      Boolean   @default(true)
+  assignedAt  DateTime  @default(now())
+
+  ponente     Ponente   @relation(fields: [ponenteId], references: [id], onDelete: Cascade)
+  evaluador   Evaluador @relation(fields: [evaluadorId], references: [id], onDelete: Cascade)
+
+  evaluacion  PonenciaEvaluacion?
+
+  @@unique([ponenteId, evaluadorId])
+  @@index([ponenteId])
+  @@index([evaluadorId])
+  @@map("ponentes_evaluadores")
+}
+
+model PonenciaEvaluacion {
+  id            String            @id @default(uuid())
+  asignacionId  String            @unique
+
+  ponenteId     String
+  evaluadorId   String
+
+  puntaje       Float?
+  concepto      String?
+  observaciones String?
+  decision      String?
+  estado        String            @default("BORRADOR")
+
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  asignacion    PonenteEvaluador  @relation(fields: [asignacionId], references: [id], onDelete: Cascade)
+  ponente       Ponente           @relation(fields: [ponenteId], references: [id], onDelete: Cascade)
+  evaluador     Evaluador         @relation(fields: [evaluadorId], references: [id], onDelete: Cascade)
+
+  @@index([ponenteId])
+  @@index([evaluadorId])
+  @@index([estado])
+  @@map("ponencias_evaluaciones")
+}
+
+model Salon {
+  id               String   @id @default(uuid())
+  nombre           String
+  capacidadPonente Int
+  activo           Boolean  @default(true)
+
+  programaciones   ProgramacionPonencia[]
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([nombre])
+  @@map("salones")
+}
+
+model ProgramacionPonencia {
+  id         String   @id @default(uuid())
+
+  ponenteId  String   @unique
+  salonId    String
+
+  fecha      DateTime
+  inicio     String
+  fin        String
+
+  assignedAt DateTime @default(now())
+
+  ponente    Ponente  @relation(fields: [ponenteId], references: [id], onDelete: Cascade)
+  salon      Salon    @relation(fields: [salonId], references: [id], onDelete: Cascade)
+
+  @@index([salonId])
+  @@index([fecha])
+  @@index([ponenteId])
+  @@map("programacion_ponencias")
 }

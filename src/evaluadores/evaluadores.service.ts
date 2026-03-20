@@ -1,13 +1,15 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateEvaluadorDto } from "./dto/create-evaluador.dto";
+import { sanitizeDeep } from "../common/utils/normalizer";
 
 @Injectable()
 export class EvaluadoresService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(dto: CreateEvaluadorDto) {
-    return this.prisma.evaluador.create({ data: dto });
+    const cleanDto = sanitizeDeep(dto);
+    return this.prisma.evaluador.create({ data: cleanDto });
   }
 
   async list() {
