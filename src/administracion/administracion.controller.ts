@@ -1,3 +1,4 @@
+//src/administracion/administracion.controller.ts
 import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { AdministracionService } from "./administracion.service";

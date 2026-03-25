@@ -1,3 +1,4 @@
+//src/administracion/dto/asignar-programacion-automatica.dto.ts
 import { IsBoolean, IsOptional, IsString } from "class-validator";
 
 export class AsignarProgramacionAutomaticaDto {

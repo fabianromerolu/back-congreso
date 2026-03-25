@@ -1,3 +1,4 @@
+//src/administracion/administracion.service.ts
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { sanitizeDeep, areEquivalent, normalizeComparable } from "../common/utils/normalizer";
@@ -248,6 +249,10 @@ export class AdministracionService {
   async asignarEvaluadoresAutomatico(dto: AsignacionAutomaticaDto) {
     const cantidad = dto.cantidadEvaluadoresPorPonente;
 
+    if (cantidad !== 2) {
+      throw new BadRequestException("Actualmente este flujo exige exactamente 2 evaluadores por ponencia.");
+    }
+
     const [ponentes, evaluadores, asignacionesExistentes] = await Promise.all([
       this.prisma.ponente.findMany({ orderBy: { createdAt: "asc" } }),
       this.prisma.evaluador.findMany({
@@ -270,13 +275,19 @@ export class AdministracionService {
       loadMap.set(ev.id, ev.asignaciones.filter((a) => a.activo).length);
     }
 
-    const existingPairs = new Set(asignacionesExistentes.map((a) => `${a.ponenteId}:${a.evaluadorId}`));
+    const existingPairs = new Set(
+      asignacionesExistentes.map((a) => `${a.ponenteId}:${a.evaluadorId}`),
+    );
+
     const inserts: Array<{ ponenteId: string; evaluadorId: string }> = [];
-    const resumen: any[] = [];
+    const resumen: Array<Record<string, unknown>> = [];
+    const errores: Array<Record<string, unknown>> = [];
 
     for (const ponente of ponentes) {
-      const already = asignacionesExistentes.filter((a) => a.ponenteId === ponente.id).length;
-      const faltan = Math.max(cantidad - already, 0);
+      const asignadosActuales = asignacionesExistentes.filter((a) => a.ponenteId === ponente.id);
+      const evaluadoresYaAsignadosIds = new Set(asignadosActuales.map((a) => a.evaluadorId));
+
+      const faltan = Math.max(cantidad - asignadosActuales.length, 0);
 
       if (faltan === 0) {
         resumen.push({
@@ -285,21 +296,40 @@ export class AdministracionService {
           tituloPonencia: ponente.tituloPonencia,
           asignados: 0,
           faltantes: 0,
-          mensaje: "Ya tenía cupo completo.",
+          mensaje: "Ya tenía 2 evaluadores asignados.",
         });
         continue;
       }
 
-      const candidatos = evaluadores
+      const compatibles = evaluadores
         .filter((ev) => this.isEvaluadorCompatibleConPonente(ponente, ev))
-        .filter((ev) => !existingPairs.has(`${ponente.id}:${ev.id}`))
+        .filter((ev) => !evaluadoresYaAsignadosIds.has(ev.id))
         .sort((a, b) => (loadMap.get(a.id) ?? 0) - (loadMap.get(b.id) ?? 0));
 
-      const seleccionados = candidatos.slice(0, faltan);
+      if (compatibles.length < faltan) {
+        errores.push({
+          ponenteId: ponente.id,
+          documento: ponente.documento,
+          tituloPonencia: ponente.tituloPonencia,
+          universidad: ponente.universidad,
+          faltan,
+          compatiblesDisponibles: compatibles.length,
+          mensaje:
+            "No existen suficientes evaluadores compatibles para completar 2 asignaciones sin violar la regla de universidad.",
+        });
+        continue;
+      }
+
+      const seleccionados = compatibles.slice(0, faltan);
 
       for (const ev of seleccionados) {
-        inserts.push({ ponenteId: ponente.id, evaluadorId: ev.id });
+        inserts.push({
+          ponenteId: ponente.id,
+          evaluadorId: ev.id,
+        });
+
         existingPairs.add(`${ponente.id}:${ev.id}`);
+        evaluadoresYaAsignadosIds.add(ev.id);
         loadMap.set(ev.id, (loadMap.get(ev.id) ?? 0) + 1);
       }
 
@@ -308,13 +338,22 @@ export class AdministracionService {
         documento: ponente.documento,
         tituloPonencia: ponente.tituloPonencia,
         asignados: seleccionados.length,
-        faltantes: Math.max(faltan - seleccionados.length, 0),
+        faltantes: 0,
         evaluadores: seleccionados.map((ev) => ({
           id: ev.id,
           documento: ev.documento,
           nombres: ev.nombres,
           apellidos: ev.apellidos,
+          cargaResultante: loadMap.get(ev.id) ?? 0,
         })),
+      });
+    }
+
+    if (errores.length > 0) {
+      throw new BadRequestException({
+        message:
+          "No fue posible completar la asignación automática para todas las ponencias. Hay ponencias sin suficientes evaluadores compatibles.",
+        errores,
       });
     }
 
@@ -329,6 +368,7 @@ export class AdministracionService {
       ok: true,
       cantidadEvaluadoresPorPonente: cantidad,
       totalAsignacionesCreadas: inserts.length,
+      totalPonenciasProcesadas: ponentes.length,
       resumen,
     };
   }
