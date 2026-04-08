@@ -5,6 +5,7 @@ import { CloudinaryModule } from "./cloudinary/cloudinary.module";
 import { PonentesModule } from "./ponentes/ponentes.module";
 import { EvaluadoresModule } from "./evaluadores/evaluadores.module";
 import { AsistentesModule } from "./asistentes/asistentes.module";
+import { AsistenciasModule } from "./asistencias/asistencias.module";
 import { Module } from "@nestjs/common";
 import { AdministracionModule } from "./administracion/administracion.module";
 @Module({
@@ -15,6 +16,7 @@ import { AdministracionModule } from "./administracion/administracion.module";
     PonentesModule,
     EvaluadoresModule,
     AsistentesModule,
+    AsistenciasModule,
     InscripcionesModule,
     AdministracionModule,
   ],

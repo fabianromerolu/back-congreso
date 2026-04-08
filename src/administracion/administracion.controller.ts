@@ -2,6 +2,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { AdministracionService } from "./administracion.service";
+import { AsistenciasService } from "../asistencias/asistencias.service";
 import { ComplementarPonenteDto } from "./dto/complementar-ponente.dto";
 import { AsignacionManualDto } from "./dto/asignacion-manual.dto";
 import { AsignacionAutomaticaDto } from "./dto/asignacion-automatica.dto";
@@ -14,7 +15,10 @@ import { AsignarProgramacionManualDto } from "./dto/asignar-programacion-manual.
 @ApiTags("administracion")
 @Controller("administracion")
 export class AdministracionController {
-  constructor(private readonly service: AdministracionService) {}
+  constructor(
+    private readonly service: AdministracionService,
+    private readonly asistenciasService: AsistenciasService,
+  ) {}
 
   @Get("registros")
   getRegistros(@Query() query: Record<string, any>) {
@@ -39,6 +43,11 @@ export class AdministracionController {
   @Post("asignaciones/automaticas")
   asignacionAutomatica(@Body() dto: AsignacionAutomaticaDto) {
     return this.service.asignarEvaluadoresAutomatico(dto);
+  }
+
+  @Post("asignaciones/tardias")
+  asignacionTardias() {
+    return this.service.asignarEvaluadoresTardias();
   }
 
   @Get("evaluadores/:documento/ponentes-asignados")
@@ -89,5 +98,21 @@ export class AdministracionController {
   @Get("programacion")
   getProgramacion(@Query() query: Record<string, any>) {
     return this.service.getProgramacion(query);
+  }
+
+  @Get("asistencias")
+  getAsistenciasSnapshot() {
+    return this.asistenciasService.getAdminSnapshot();
+  }
+
+  @Patch("asistencias/configuracion")
+  updateAsistenciasConfig(@Body() body: { enabled?: boolean; habilitado?: boolean }) {
+    const enabled = body.enabled ?? body.habilitado ?? false;
+    return this.asistenciasService.updateConfig(enabled);
+  }
+
+  @Post("asistencias/certificados/enviar")
+  sendCertificates(@Body() body: { pendingOnly?: boolean }) {
+    return this.asistenciasService.sendCertificates(body.pendingOnly ?? true);
   }
 }

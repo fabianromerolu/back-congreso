@@ -938,6 +938,106 @@ export class AdministracionService {
     };
   }
 
+  async asignarEvaluadoresTardias() {
+    const cantidad = 2;
+
+    const [ponentes, evaluadores, asignacionesExistentes] = await Promise.all([
+      this.prisma.ponente.findMany({ orderBy: { createdAt: "asc" } }),
+      this.prisma.evaluador.findMany({
+        include: { asignaciones: { where: { activo: true } } },
+        orderBy: { createdAt: "asc" },
+      }),
+      this.prisma.ponenteEvaluador.findMany(),
+    ]);
+
+    const sinEvaluador = ponentes.filter(
+      (p) => !asignacionesExistentes.some((a) => a.ponenteId === p.id),
+    );
+
+    if (!sinEvaluador.length) {
+      return {
+        ok: true,
+        message: "No hay ponencias tardías sin evaluadores asignados.",
+        totalProcesadas: 0,
+        totalAsignacionesCreadas: 0,
+        asignadas: [],
+        sinCobertura: [],
+      };
+    }
+
+    const loadMap = new Map<string, number>();
+    for (const ev of evaluadores) {
+      loadMap.set(ev.id, ev.asignaciones.length);
+    }
+
+    const existingPairs = new Set(
+      asignacionesExistentes.map((a) => `${a.ponenteId}:${a.evaluadorId}`),
+    );
+
+    const inserts: Array<{ ponenteId: string; evaluadorId: string }> = [];
+    const asignadas: Array<Record<string, unknown>> = [];
+    const sinCobertura: Array<Record<string, unknown>> = [];
+
+    for (const ponente of sinEvaluador) {
+      const compatibles = evaluadores
+        .filter((ev) => this.isEvaluadorCompatibleConPonente(ponente, ev))
+        .filter((ev) => !existingPairs.has(`${ponente.id}:${ev.id}`))
+        .sort((a, b) => (loadMap.get(a.id) ?? 0) - (loadMap.get(b.id) ?? 0));
+
+      if (compatibles.length < cantidad) {
+        sinCobertura.push({
+          ponenteId: ponente.id,
+          documento: ponente.documento,
+          tituloPonencia: ponente.tituloPonencia,
+          universidad: ponente.universidad,
+          compatiblesDisponibles: compatibles.length,
+          mensaje:
+            compatibles.length === 0
+              ? "No hay evaluadores compatibles (conflicto de universidad)."
+              : `Solo hay ${compatibles.length} evaluador(es) compatible(s), se necesitan ${cantidad}.`,
+        });
+        continue;
+      }
+
+      const seleccionados = compatibles.slice(0, cantidad);
+
+      for (const ev of seleccionados) {
+        inserts.push({ ponenteId: ponente.id, evaluadorId: ev.id });
+        existingPairs.add(`${ponente.id}:${ev.id}`);
+        loadMap.set(ev.id, (loadMap.get(ev.id) ?? 0) + 1);
+      }
+
+      asignadas.push({
+        ponenteId: ponente.id,
+        documento: ponente.documento,
+        tituloPonencia: ponente.tituloPonencia,
+        evaluadoresAsignados: seleccionados.map((ev) => ({
+          id: ev.id,
+          documento: ev.documento,
+          nombres: ev.nombres,
+          apellidos: ev.apellidos,
+          cargaResultante: loadMap.get(ev.id) ?? 0,
+        })),
+      });
+    }
+
+    if (inserts.length) {
+      await this.prisma.ponenteEvaluador.createMany({
+        data: inserts,
+        skipDuplicates: true,
+      });
+    }
+
+    return {
+      ok: true,
+      totalProcesadas: sinEvaluador.length,
+      totalAsignacionesCreadas: inserts.length,
+      totalSinCobertura: sinCobertura.length,
+      asignadas,
+      sinCobertura,
+    };
+  }
+
   async getProgramacion(query: Record<string, any>) {
     const where: any = {};
 

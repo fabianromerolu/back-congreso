@@ -214,6 +214,38 @@ model Salon {
   @@map("salones")
 }
 
+model AsistenciaConfig {
+  id         String   @id @default(uuid())
+  habilitado Boolean  @default(false)
+  updatedAt  DateTime @updatedAt
+
+  @@map("asistencias_config")
+}
+
+model AsistenciaRegistro {
+  id                   String    @id @default(uuid())
+  role                 String
+  nombres              String
+  apellidos            String
+  tipoDocumento        String
+  documento            String
+  email                String
+  telefono             String
+  institucion          String
+  ciudad               String
+  source               String    @default("direct")
+  certificateStatus    String    @default("pending")
+  certificateSentAt    DateTime?
+  certificateError     String?
+  linkedRegistrationId String?
+  createdAt            DateTime  @default(now())
+
+  @@index([role])
+  @@index([documento])
+  @@index([certificateStatus])
+  @@map("asistencias_registros")
+}
+
 model ProgramacionPonencia {
   id         String   @id @default(uuid())
 
