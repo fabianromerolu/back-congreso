@@ -112,7 +112,18 @@ export class AdministracionController {
   }
 
   @Post("asistencias/certificados/enviar")
-  sendCertificates(@Body() body: { pendingOnly?: boolean }) {
-    return this.asistenciasService.sendCertificates(body.pendingOnly ?? true);
+  sendCertificates(@Body() body: { pendingOnly?: boolean; retryErrors?: boolean }) {
+    return this.asistenciasService.sendCertificates({
+      pendingOnly: body.pendingOnly ?? true,
+      retryErrors: body.retryErrors ?? true,
+    });
+  }
+
+  @Post("asistencias/certificados/generar")
+  generateCertificates(@Body() body: { pendingOnly?: boolean; retryErrors?: boolean }) {
+    return this.asistenciasService.sendCertificates({
+      pendingOnly: body.pendingOnly ?? true,
+      retryErrors: body.retryErrors ?? true,
+    });
   }
 }

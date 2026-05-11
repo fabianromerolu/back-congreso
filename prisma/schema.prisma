@@ -233,6 +233,7 @@ model AsistenciaRegistro {
   telefono             String
   institucion          String
   ciudad               String
+  semillero            String?
   source               String    @default("direct")
   certificateStatus    String    @default("pending")
   certificateSentAt    DateTime?

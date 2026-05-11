@@ -1,8 +1,9 @@
 import { IsIn, IsNotEmpty, IsOptional, IsString } from "class-validator";
 
 export class CreateAsistenciaDto {
+  @IsOptional()
   @IsIn(["ponente", "asistente", "evaluador"])
-  role!: string;
+  role?: string;
 
   @IsString()
   @IsNotEmpty()
@@ -35,6 +36,10 @@ export class CreateAsistenciaDto {
   @IsString()
   @IsNotEmpty()
   ciudad!: string;
+
+  @IsOptional()
+  @IsString()
+  semillero?: string;
 
   @IsOptional()
   @IsIn(["qr", "direct"])
