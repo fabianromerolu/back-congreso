@@ -1,4 +1,11 @@
-import { IsIn, IsNotEmpty, IsOptional, IsString } from "class-validator";
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsIn,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+} from "class-validator";
 
 export class CreateAsistenciaDto {
   @IsOptional()
@@ -33,6 +40,30 @@ export class CreateAsistenciaDto {
   @IsNotEmpty()
   institucion!: string;
 
+  @IsOptional()
+  @IsString()
+  universidad?: string;
+
+  @IsOptional()
+  @IsString()
+  programa?: string;
+
+  @IsOptional()
+  @IsString()
+  semestre?: string;
+
+  @IsOptional()
+  @IsString()
+  profesion?: string;
+
+  @IsOptional()
+  @IsString()
+  posgrado?: string;
+
+  @IsOptional()
+  @IsString()
+  universidadPosgrado?: string;
+
   @IsString()
   @IsNotEmpty()
   ciudad!: string;
@@ -40,6 +71,22 @@ export class CreateAsistenciaDto {
   @IsOptional()
   @IsString()
   semillero?: string;
+
+  @IsOptional()
+  @IsString()
+  tituloPonencia?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(9)
+  @IsString({ each: true })
+  ponenciaIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(9)
+  @IsString({ each: true })
+  ponenciasEvaluadas?: string[];
 
   @IsOptional()
   @IsIn(["qr", "direct"])

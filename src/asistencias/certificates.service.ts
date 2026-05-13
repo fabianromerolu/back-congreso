@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from "@nestjs/comm
 import type { AsistenciaRegistro, Evaluador, Ponente } from "@prisma/client";
 import { execFile } from "child_process";
 import { createReadStream, existsSync } from "fs";
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "fs/promises";
 import JSZip from "jszip";
 import { basename, dirname, join, resolve } from "path";
 import { promisify } from "util";
@@ -193,6 +193,34 @@ export class CertificatesService {
     };
   }
 
+  async getGeneratedCertificateFile(record: AsistenciaRegistro) {
+    const pdfPath = await this.getCertificatePdfPath(record);
+
+    if (!existsSync(pdfPath)) {
+      throw new NotFoundException("El archivo PDF del certificado no esta disponible.");
+    }
+
+    return {
+      path: pdfPath,
+      filename: this.getPublicFilename(record),
+    };
+  }
+
+  async deleteGeneratedFiles(record: AsistenciaRegistro) {
+    const outputBase = await this.getCertificateOutputBase(record);
+    const paths = [`${outputBase}.docx`, `${outputBase}.pdf`];
+    let deleted = 0;
+
+    for (const path of paths) {
+      if (!existsSync(path)) continue;
+
+      await unlink(path);
+      deleted += 1;
+    }
+
+    return { deletedFiles: deleted };
+  }
+
   async resolveLinkedRegistrationId(role: string, documento: string) {
     if (role === "ponente") {
       const ponente = await this.findPonenteByDocumento(documento);
@@ -244,7 +272,8 @@ export class CertificatesService {
           ponente: {
             autor1: base.fullName,
             documento1: record.documento,
-            tituloPonencia: "PONENCIA PRESENTADA EN EL MARCO DEL EVENTO",
+            tituloPonencia:
+              record.tituloPonencia || "PONENCIA PRESENTADA EN EL MARCO DEL EVENTO",
             semillero: record.semillero || "NO REGISTRA",
           },
         };
@@ -261,34 +290,35 @@ export class CertificatesService {
           documento1: ponente.documento,
           autor2: autor2 || undefined,
           documento2: ponente.documento2 ?? undefined,
-          tituloPonencia: ponente.tituloPonencia,
+          tituloPonencia: record.tituloPonencia || ponente.tituloPonencia,
           semillero: record.semillero || ponente.semillero,
         },
       };
     }
 
     const evaluador = await this.findEvaluadorByDocumento(record.documento);
+    const manualPonencias = this.readStoredPonencias(record.ponenciasEvaluadas);
 
     if (!evaluador) {
-      throw new BadRequestException(
-        "No se encontro una inscripcion de evaluador asociada a este documento.",
-      );
+      if (!manualPonencias.length) {
+        throw new BadRequestException(
+          "No se encontro una inscripcion de evaluador asociada a este documento ni ponencias manuales para el certificado.",
+        );
+      }
+
+      return {
+        ...base,
+        linkedRegistrationId: null,
+        evaluador: {
+          universidad: record.institucion,
+          ponencias: manualPonencias,
+        },
+      };
     }
 
-    const asignaciones = await this.prisma.ponenteEvaluador.findMany({
-      where: {
-        evaluadorId: evaluador.id,
-        activo: true,
-      },
-      include: {
-        ponente: true,
-      },
-      orderBy: { assignedAt: "asc" },
-    });
-
-    const ponencias = asignaciones
-      .map((asignacion) => asignacion.ponente?.tituloPonencia)
-      .filter((titulo): titulo is string => Boolean(titulo?.trim()));
+    const ponencias = manualPonencias.length
+      ? manualPonencias
+      : await this.findPonenciasAsignadasAEvaluador(evaluador.id);
 
     if (!ponencias.length) {
       throw new BadRequestException(
@@ -379,9 +409,10 @@ export class CertificatesService {
   }
 
   private buildEvaluatorTitleParagraphs(titles: string[]) {
-    const size = titles.length > 6 ? "16" : titles.length > 3 ? "18" : "20";
+    const limitedTitles = titles.slice(0, 9);
+    const size = limitedTitles.length > 6 ? "16" : limitedTitles.length > 3 ? "18" : "20";
 
-    return titles
+    return limitedTitles
       .map((title) => {
         const safeTitle = this.escapeXml(this.upper(title));
         return [
@@ -396,6 +427,33 @@ export class CertificatesService {
         ].join("");
       })
       .join("");
+  }
+
+  private async findPonenciasAsignadasAEvaluador(evaluadorId: string) {
+    const asignaciones = await this.prisma.ponenteEvaluador.findMany({
+      where: {
+        evaluadorId,
+        activo: true,
+      },
+      include: {
+        ponente: true,
+      },
+      orderBy: { assignedAt: "asc" },
+    });
+
+    return asignaciones
+      .map((asignacion) => asignacion.ponente?.tituloPonencia)
+      .filter((titulo): titulo is string => Boolean(titulo?.trim()))
+      .slice(0, 9);
+  }
+
+  private readStoredPonencias(value: unknown) {
+    if (!Array.isArray(value)) return [];
+
+    return value
+      .map((item) => String(item ?? "").trim())
+      .filter(Boolean)
+      .slice(0, 9);
   }
 
   private getTemplatePath(role: CertificateRole) {

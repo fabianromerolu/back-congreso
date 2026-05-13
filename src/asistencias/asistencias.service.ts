@@ -1,13 +1,31 @@
 // src/asistencias/asistencias.service.ts
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { Prisma, type AsistenciaRegistro } from "@prisma/client";
 import { areEquivalent, normalizeToStore } from "../common/utils/normalizer";
 import { PrismaService } from "../prisma/prisma.service";
+import { CertificateEmailService } from "./certificate-email.service";
 import { CertificatesService } from "./certificates.service";
 import { CreateAsistenciaDto } from "./dto/create-asistencia.dto";
+
+type AttendanceRole = "ponente" | "asistente" | "evaluador";
 
 type SendCertificatesOptions = {
   pendingOnly?: boolean;
   retryErrors?: boolean;
+  sendEmail?: boolean;
+  recordIds?: string[];
+};
+
+type RegisterOptions = {
+  skipConfig?: boolean;
+  upsert?: boolean;
+  adminManual?: boolean;
+};
+
+type EmailSummary = {
+  sent: number;
+  skipped: number;
+  failed: number;
 };
 
 @Injectable()
@@ -15,6 +33,7 @@ export class AsistenciasService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly certificates: CertificatesService,
+    private readonly certificateEmail: CertificateEmailService,
   ) {}
 
   async getConfigPublica() {
@@ -22,11 +41,11 @@ export class AsistenciasService {
     return { enabled: config.habilitado };
   }
 
-  async register(dto: CreateAsistenciaDto) {
+  async register(dto: CreateAsistenciaDto, options: RegisterOptions = {}) {
     const config = await this.getOrCreateConfig();
     const cleanDto = this.normalizeAttendanceInput(dto);
 
-    if (!config.habilitado) {
+    if (!options.skipConfig && !config.habilitado) {
       throw new BadRequestException("El registro de asistencias no esta habilitado.");
     }
 
@@ -34,14 +53,12 @@ export class AsistenciasService {
       throw new BadRequestException("Rol de asistencia no valido.");
     }
 
-    const roleRecords = await this.prisma.asistenciaRegistro.findMany({
-      where: { role: cleanDto.role },
-    });
-    const existing = roleRecords.find((record) =>
-      areEquivalent(record.documento, cleanDto.documento),
+    const existing = await this.findExistingAttendance(
+      cleanDto.role,
+      cleanDto.documento,
     );
 
-    if (existing) {
+    if (existing && !options.upsert) {
       throw new BadRequestException(
         "Ya existe un registro de asistencia para este documento y rol.",
       );
@@ -51,22 +68,49 @@ export class AsistenciasService {
       cleanDto.role,
       cleanDto.documento,
     );
+    const ponenciasEvaluadas = await this.resolvePonenciasEvaluadas(cleanDto);
 
-    return this.prisma.asistenciaRegistro.create({
-      data: {
-        role: cleanDto.role,
-        nombres: cleanDto.nombres,
-        apellidos: cleanDto.apellidos,
-        tipoDocumento: cleanDto.tipoDocumento,
-        documento: cleanDto.documento,
-        email: cleanDto.email,
-        telefono: cleanDto.telefono,
-        institucion: cleanDto.institucion,
-        ciudad: cleanDto.ciudad,
-        semillero: cleanDto.semillero || null,
-        source: cleanDto.source ?? "direct",
-        linkedRegistrationId,
-      },
+    if (options.adminManual) {
+      this.validateManualAttendance(cleanDto, linkedRegistrationId, ponenciasEvaluadas);
+    }
+
+    const data = {
+      role: cleanDto.role,
+      nombres: cleanDto.nombres,
+      apellidos: cleanDto.apellidos,
+      tipoDocumento: cleanDto.tipoDocumento,
+      documento: cleanDto.documento,
+      email: cleanDto.email,
+      telefono: cleanDto.telefono,
+      institucion: cleanDto.institucion,
+      ciudad: cleanDto.ciudad,
+      semillero: cleanDto.semillero || null,
+      tituloPonencia: cleanDto.tituloPonencia || null,
+      ponenciasEvaluadas: ponenciasEvaluadas.length
+        ? (ponenciasEvaluadas as Prisma.InputJsonValue)
+        : Prisma.JsonNull,
+      source: cleanDto.source ?? "direct",
+      certificateStatus: "pending",
+      certificateSentAt: null,
+      certificateError: null,
+      linkedRegistrationId,
+    };
+
+    if (existing) {
+      return this.prisma.asistenciaRegistro.update({
+        where: { id: existing.id },
+        data,
+      });
+    }
+
+    return this.prisma.asistenciaRegistro.create({ data });
+  }
+
+  registerManual(dto: CreateAsistenciaDto) {
+    return this.register(dto, {
+      skipConfig: true,
+      upsert: true,
+      adminManual: true,
     });
   }
 
@@ -100,17 +144,27 @@ export class AsistenciasService {
   async sendCertificates(options: SendCertificatesOptions = {}) {
     const pendingOnly = options.pendingOnly ?? true;
     const retryErrors = options.retryErrors ?? true;
+    const sendEmail = options.sendEmail ?? false;
     const statuses = retryErrors ? ["pending", "error"] : ["pending"];
-    const where = pendingOnly
-      ? { certificateStatus: { in: statuses } }
-      : undefined;
+    const recordIds = this.cleanIds(options.recordIds ?? []);
+    const where = recordIds.length
+      ? { id: { in: recordIds } }
+      : pendingOnly
+        ? { certificateStatus: { in: statuses } }
+        : undefined;
 
     const records = await this.prisma.asistenciaRegistro.findMany({ where });
-    const existingErrorRecords = retryErrors
-      ? []
-      : await this.prisma.asistenciaRegistro.findMany({
-          where: { certificateStatus: "error" },
-        });
+
+    if (recordIds.length && !records.length) {
+      throw new NotFoundException("No se encontro el registro de asistencia indicado.");
+    }
+
+    const existingErrorRecords =
+      retryErrors || recordIds.length
+        ? []
+        : await this.prisma.asistenciaRegistro.findMany({
+            where: { certificateStatus: "error" },
+          });
 
     if (!records.length) {
       return {
@@ -126,6 +180,7 @@ export class AsistenciasService {
         processed: 0,
         procesados: 0,
         retryErrors,
+        email: { sent: 0, skipped: 0, failed: 0 },
         failedRecords: [],
         registrosFallidos: [],
         existingErrorRecords: existingErrorRecords.map((record) =>
@@ -139,28 +194,43 @@ export class AsistenciasService {
 
     let generated = 0;
     let failed = 0;
+    const email: EmailSummary = { sent: 0, skipped: 0, failed: 0 };
     const generatedRecords: Array<Record<string, unknown>> = [];
     const failedRecords: Array<Record<string, unknown>> = [];
 
     for (const record of records) {
       try {
         const result = await this.certificates.generateCertificate(record);
+        const emailResult = sendEmail
+          ? await this.sendGeneratedCertificateEmail(record)
+          : null;
+
+        if (emailResult?.sent) email.sent += 1;
+        if (emailResult?.skipped) email.skipped += 1;
 
         const updated = await this.prisma.asistenciaRegistro.update({
           where: { id: record.id },
           data: {
             certificateStatus: "sent",
             certificateSentAt: new Date(),
-            certificateError: null,
+            certificateError: emailResult?.skipped ? emailResult.message : null,
             linkedRegistrationId:
               result.linkedRegistrationId ?? record.linkedRegistrationId,
           },
         });
 
         generated += 1;
-        generatedRecords.push(this.serializeCertificateRecord(updated));
+        generatedRecords.push(
+          this.serializeCertificateRecord(updated, {
+            emailSent: Boolean(emailResult?.sent),
+            emailSkipped: Boolean(emailResult?.skipped),
+            emailMessage: emailResult?.message ?? null,
+          }),
+        );
       } catch (error) {
         failed += 1;
+        if (sendEmail) email.failed += 1;
+
         const message =
           error instanceof Error
             ? error.message
@@ -181,8 +251,12 @@ export class AsistenciasService {
       }
     }
 
+    const emailMessage = sendEmail
+      ? ` Correos enviados: ${email.sent}. Omitidos: ${email.skipped}.`
+      : "";
+
     return {
-      message: `Proceso finalizado. Generados: ${generated}. Fallidos: ${failed}.`,
+      message: `Proceso finalizado. Generados: ${generated}. Fallidos: ${failed}.${emailMessage}`,
       sent: generated,
       enviados: generated,
       generated,
@@ -192,11 +266,69 @@ export class AsistenciasService {
       processed: records.length,
       procesados: records.length,
       retryErrors,
+      email,
       generatedRecords,
       registrosGenerados: generatedRecords,
       failedRecords,
       registrosFallidos: failedRecords,
     };
+  }
+
+  async clearGeneratedCertificates() {
+    const records = await this.prisma.asistenciaRegistro.findMany({
+      where: { certificateStatus: "sent" },
+    });
+
+    let deletedFiles = 0;
+    let reset = 0;
+
+    for (const record of records) {
+      const result = await this.certificates.deleteGeneratedFiles(record);
+      deletedFiles += result.deletedFiles;
+
+      await this.resetCertificateRecord(record.id);
+      reset += 1;
+    }
+
+    return {
+      message: `Certificados borrados: ${records.length}. Registros reiniciados: ${reset}.`,
+      deleted: records.length,
+      eliminados: records.length,
+      reset,
+      reiniciados: reset,
+      affected: reset,
+      afectados: reset,
+      deletedFiles,
+      archivosEliminados: deletedFiles,
+    };
+  }
+
+  async deleteGeneratedCertificate(recordId: string) {
+    const record = await this.findAttendanceRecord(recordId);
+    const result = await this.certificates.deleteGeneratedFiles(record);
+
+    await this.resetCertificateRecord(record.id);
+
+    return {
+      message: "Certificado borrado y registro listo para regenerar.",
+      deleted: 1,
+      eliminados: 1,
+      reset: 1,
+      reiniciados: 1,
+      affected: 1,
+      afectados: 1,
+      deletedFiles: result.deletedFiles,
+      archivosEliminados: result.deletedFiles,
+    };
+  }
+
+  regenerateCertificate(recordId: string, options: { sendEmail?: boolean } = {}) {
+    return this.sendCertificates({
+      recordIds: [recordId],
+      pendingOnly: false,
+      retryErrors: true,
+      sendEmail: options.sendEmail ?? true,
+    });
   }
 
   lookupCertificateByDocument(documento: string) {
@@ -205,6 +337,34 @@ export class AsistenciasService {
 
   getCertificateDownload(recordId: string) {
     return this.certificates.getDownloadFile(recordId);
+  }
+
+  private async sendGeneratedCertificateEmail(record: AsistenciaRegistro) {
+    const file = await this.certificates.getGeneratedCertificateFile(record);
+    return this.certificateEmail.sendCertificate(record, file.path, file.filename);
+  }
+
+  private async resetCertificateRecord(id: string) {
+    return this.prisma.asistenciaRegistro.update({
+      where: { id },
+      data: {
+        certificateStatus: "pending",
+        certificateSentAt: null,
+        certificateError: null,
+      },
+    });
+  }
+
+  private async findAttendanceRecord(id: string) {
+    const record = await this.prisma.asistenciaRegistro.findUnique({
+      where: { id },
+    });
+
+    if (!record) {
+      throw new NotFoundException("Registro de asistencia no encontrado.");
+    }
+
+    return record;
   }
 
   private async getOrCreateConfig() {
@@ -216,8 +376,64 @@ export class AsistenciasService {
     });
   }
 
-  private isValidRole(role?: string): role is "ponente" | "asistente" | "evaluador" {
+  private isValidRole(role?: string): role is AttendanceRole {
     return role === "ponente" || role === "asistente" || role === "evaluador";
+  }
+
+  private async findExistingAttendance(role: AttendanceRole, documento: string) {
+    const roleRecords = await this.prisma.asistenciaRegistro.findMany({
+      where: { role },
+    });
+
+    return (
+      roleRecords.find((record) => areEquivalent(record.documento, documento)) ??
+      null
+    );
+  }
+
+  private validateManualAttendance(
+    dto: ReturnType<AsistenciasService["normalizeAttendanceInput"]>,
+    linkedRegistrationId: string | null,
+    ponenciasEvaluadas: string[],
+  ) {
+    if (dto.role === "ponente" && !linkedRegistrationId && !dto.tituloPonencia) {
+      throw new BadRequestException(
+        "Debes indicar el nombre de la ponencia presentada por el ponente.",
+      );
+    }
+
+    if (dto.role === "evaluador" && !ponenciasEvaluadas.length) {
+      throw new BadRequestException(
+        "Debes seleccionar al menos una ponencia evaluada por el evaluador.",
+      );
+    }
+  }
+
+  private async resolvePonenciasEvaluadas(
+    dto: ReturnType<AsistenciasService["normalizeAttendanceInput"]>,
+  ) {
+    if (dto.role !== "evaluador") return [];
+
+    const ids = this.cleanIds(dto.ponenciaIds ?? []).slice(0, 9);
+    const manualTitles = this.cleanTitles(dto.ponenciasEvaluadas ?? []);
+
+    if (!ids.length) return manualTitles.slice(0, 9);
+
+    const ponentes = await this.prisma.ponente.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, tituloPonencia: true },
+    });
+    const titlesById = new Map(ponentes.map((ponente) => [ponente.id, ponente.tituloPonencia]));
+
+    const titlesFromIds = ids
+      .map((id) => titlesById.get(id))
+      .filter((title): title is string => Boolean(title?.trim()));
+
+    return [...titlesFromIds, ...manualTitles]
+      .map((title) => normalizeToStore(title) ?? "")
+      .filter(Boolean)
+      .filter((title, index, arr) => arr.indexOf(title) === index)
+      .slice(0, 9);
   }
 
   private normalizeAttendanceInput(dto: CreateAsistenciaDto) {
@@ -229,25 +445,50 @@ export class AsistenciasService {
       documento: normalizeToStore(dto.documento) ?? "",
       email: normalizeToStore(dto.email) ?? "",
       telefono: normalizeToStore(dto.telefono) ?? "",
-      institucion: normalizeToStore(dto.institucion) ?? "",
+      institucion: normalizeToStore(dto.institucion || dto.universidad) ?? "",
       ciudad: normalizeToStore(dto.ciudad) ?? "",
       semillero: normalizeToStore(dto.semillero) ?? "",
+      tituloPonencia: normalizeToStore(dto.tituloPonencia) ?? "",
+      source: dto.source ?? "direct",
+      ponenciaIds: this.cleanIds(dto.ponenciaIds ?? []),
+      ponenciasEvaluadas: this.cleanTitles(dto.ponenciasEvaluadas ?? []),
     };
   }
 
-  private serializeCertificateRecord(record: {
-    id: string;
-    role: string;
-    nombres: string;
-    apellidos: string;
-    documento: string;
-    email: string;
-    semillero?: string | null;
-    certificateStatus: string;
-    certificateError: string | null;
-    certificateSentAt: Date | null;
-    linkedRegistrationId: string | null;
-  }) {
+  private cleanIds(values: string[]) {
+    return values
+      .map((value) => String(value ?? "").trim())
+      .filter(Boolean)
+      .filter((value, index, arr) => arr.indexOf(value) === index);
+  }
+
+  private cleanTitles(values: string[]) {
+    return values
+      .map((value) => normalizeToStore(value) ?? "")
+      .filter(Boolean)
+      .filter((value, index, arr) => arr.indexOf(value) === index)
+      .slice(0, 9);
+  }
+
+  private serializeCertificateRecord(
+    record: Pick<
+      AsistenciaRegistro,
+      | "id"
+      | "role"
+      | "nombres"
+      | "apellidos"
+      | "documento"
+      | "email"
+      | "semillero"
+      | "tituloPonencia"
+      | "ponenciasEvaluadas"
+      | "certificateStatus"
+      | "certificateError"
+      | "certificateSentAt"
+      | "linkedRegistrationId"
+    >,
+    extra: Record<string, unknown> = {},
+  ) {
     return {
       id: record.id,
       role: record.role,
@@ -257,10 +498,13 @@ export class AsistenciasService {
       documento: record.documento,
       email: record.email,
       semillero: record.semillero,
+      tituloPonencia: record.tituloPonencia,
+      ponenciasEvaluadas: record.ponenciasEvaluadas,
       certificateStatus: record.certificateStatus,
       certificateError: record.certificateError,
       certificateSentAt: record.certificateSentAt,
       linkedRegistrationId: record.linkedRegistrationId,
+      ...extra,
     };
   }
 }

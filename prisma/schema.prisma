@@ -234,6 +234,8 @@ model AsistenciaRegistro {
   institucion          String
   ciudad               String
   semillero            String?
+  tituloPonencia       String?
+  ponenciasEvaluadas   Json?
   source               String    @default("direct")
   certificateStatus    String    @default("pending")
   certificateSentAt    DateTime?
