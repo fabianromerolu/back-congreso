@@ -80,7 +80,7 @@ export class CertificatesService {
     });
 
     await writeFile(docxPath, generatedDocx);
-    await this.convertDocxToPdf(docxPath, pdfPath, data);
+    await this.convertDocxToPdf(docxPath, pdfPath);
 
     return {
       docxPath,
@@ -490,11 +490,7 @@ export class CertificatesService {
     return `${await this.getCertificateOutputBase(record)}.pdf`;
   }
 
-  private async convertDocxToPdf(
-    docxPath: string,
-    pdfPath: string,
-    data?: CertificateTemplateData,
-  ) {
+  private async convertDocxToPdf(docxPath: string, pdfPath: string) {
     await mkdir(dirname(pdfPath), { recursive: true });
 
     const libreOfficePath = this.findLibreOfficePath();
@@ -523,19 +519,34 @@ export class CertificatesService {
         await this.convertWithWordCom(docxPath, pdfPath);
         return;
       } catch {
-        // Word COM no disponible, continuar al fallback HTML
+        // Word COM no disponible, continuar al fallback mammoth
       }
     }
 
-    if (data) {
-      const html = this.buildHtmlCertificate(data);
-      await this.convertHtmlToPdf(html, pdfPath);
-      return;
-    }
+    await this.convertDocxViaMammoth(docxPath, pdfPath);
+  }
 
-    throw new BadRequestException(
-      "No se encontro LibreOffice para convertir los certificados a PDF.",
-    );
+  private async convertDocxViaMammoth(docxPath: string, pdfPath: string): Promise<void> {
+    const { default: mammoth } = await import("mammoth");
+    const result = await mammoth.convertToHtml({ path: docxPath });
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: Arial, sans-serif; background: #fff; }
+      img { max-width: 100%; height: auto; }
+      table { width: 100%; border-collapse: collapse; }
+      td, th { padding: 4px 8px; vertical-align: top; }
+      p { margin: 4px 0; }
+    </style>
+  </head>
+  <body>${result.value}</body>
+</html>`;
+
+    await this.convertHtmlToPdf(html, pdfPath);
   }
 
   private buildHtmlCertificate(data: CertificateTemplateData): string {
