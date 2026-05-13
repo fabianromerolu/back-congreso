@@ -84,7 +84,7 @@ export class CreateAsistenciaDto {
 
   @IsOptional()
   @IsArray()
-  @ArrayMaxSize(9)
+  @ArrayMaxSize(10)
   @IsString({ each: true })
   ponenciasEvaluadas?: string[];
 

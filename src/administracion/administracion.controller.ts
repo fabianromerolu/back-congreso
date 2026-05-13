@@ -164,6 +164,16 @@ export class AdministracionController {
     });
   }
 
+  @Delete("asistencias/registros")
+  clearAllAttendanceRecords() {
+    return this.asistenciasService.clearAllAttendanceRecords();
+  }
+
+  @Delete("asistencias/registros/:id")
+  deleteAttendanceRecord(@Param("id") id: string) {
+    return this.asistenciasService.deleteAttendanceRecord(id);
+  }
+
   @Delete("asistencias/certificados")
   clearGeneratedCertificates() {
     return this.asistenciasService.clearGeneratedCertificates();

@@ -322,6 +322,37 @@ export class AsistenciasService {
     };
   }
 
+  async deleteAttendanceRecord(recordId: string) {
+    const record = await this.findAttendanceRecord(recordId);
+    await this.certificates.deleteGeneratedFiles(record);
+    await this.prisma.asistenciaRegistro.delete({ where: { id: record.id } });
+
+    return {
+      message: "Registro de asistencia eliminado correctamente.",
+      deleted: 1,
+      eliminados: 1,
+    };
+  }
+
+  async clearAllAttendanceRecords() {
+    const records = await this.prisma.asistenciaRegistro.findMany();
+    let deletedFiles = 0;
+
+    for (const record of records) {
+      const result = await this.certificates.deleteGeneratedFiles(record);
+      deletedFiles += result.deletedFiles;
+    }
+
+    const { count } = await this.prisma.asistenciaRegistro.deleteMany();
+
+    return {
+      message: `Se eliminaron ${count} registros de asistencia.`,
+      deleted: count,
+      eliminados: count,
+      deletedFiles,
+    };
+  }
+
   regenerateCertificate(recordId: string, options: { sendEmail?: boolean } = {}) {
     return this.sendCertificates({
       recordIds: [recordId],

@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type { AsistenciaRegistro, Evaluador, Ponente } from "@prisma/client";
 import { execFile } from "child_process";
-import { createReadStream, existsSync } from "fs";
+import { createReadStream, existsSync, readFileSync } from "fs";
 import { mkdir, readFile, unlink, writeFile } from "fs/promises";
 import JSZip from "jszip";
 import { basename, dirname, join, resolve } from "path";
@@ -80,7 +80,7 @@ export class CertificatesService {
     });
 
     await writeFile(docxPath, generatedDocx);
-    await this.convertDocxToPdf(docxPath, pdfPath);
+    await this.convertDocxToPdf(docxPath, pdfPath, data);
 
     return {
       docxPath,
@@ -409,8 +409,8 @@ export class CertificatesService {
   }
 
   private buildEvaluatorTitleParagraphs(titles: string[]) {
-    const limitedTitles = titles.slice(0, 9);
-    const size = limitedTitles.length > 6 ? "16" : limitedTitles.length > 3 ? "18" : "20";
+    const limitedTitles = titles.slice(0, 10);
+    const size = limitedTitles.length > 7 ? "16" : limitedTitles.length > 4 ? "18" : "20";
 
     return limitedTitles
       .map((title) => {
@@ -444,7 +444,7 @@ export class CertificatesService {
     return asignaciones
       .map((asignacion) => asignacion.ponente?.tituloPonencia)
       .filter((titulo): titulo is string => Boolean(titulo?.trim()))
-      .slice(0, 9);
+      .slice(0, 10);
   }
 
   private readStoredPonencias(value: unknown) {
@@ -453,7 +453,7 @@ export class CertificatesService {
     return value
       .map((item) => String(item ?? "").trim())
       .filter(Boolean)
-      .slice(0, 9);
+      .slice(0, 10);
   }
 
   private getTemplatePath(role: CertificateRole) {
@@ -490,7 +490,11 @@ export class CertificatesService {
     return `${await this.getCertificateOutputBase(record)}.pdf`;
   }
 
-  private async convertDocxToPdf(docxPath: string, pdfPath: string) {
+  private async convertDocxToPdf(
+    docxPath: string,
+    pdfPath: string,
+    data?: CertificateTemplateData,
+  ) {
     await mkdir(dirname(pdfPath), { recursive: true });
 
     const libreOfficePath = this.findLibreOfficePath();
@@ -515,13 +519,111 @@ export class CertificatesService {
     }
 
     if (process.platform === "win32") {
-      await this.convertWithWordCom(docxPath, pdfPath);
+      try {
+        await this.convertWithWordCom(docxPath, pdfPath);
+        return;
+      } catch {
+        // Word COM no disponible, continuar al fallback HTML
+      }
+    }
+
+    if (data) {
+      const html = this.buildHtmlCertificate(data);
+      await this.convertHtmlToPdf(html, pdfPath);
       return;
     }
 
     throw new BadRequestException(
       "No se encontro LibreOffice para convertir los certificados a PDF.",
     );
+  }
+
+  private buildHtmlCertificate(data: CertificateTemplateData): string {
+    const htmlTemplatePath = this.getHtmlTemplatePath(data.role);
+    const templateHtml = readFileSync(htmlTemplatePath, "utf-8");
+
+    const eventName = process.env.EVENT_NAME ?? "IV CONGRESO DE SEMILLEROS UCC MONTERIA";
+    const eventDate = process.env.EVENT_DATE ?? "Mayo 2025";
+    const eventLocation = process.env.EVENT_LOCATION ?? "Monteria, Cordoba";
+
+    let html = templateHtml
+      .replace(/\{\{FULL_NAME\}\}/g, this.escapeHtml(this.upper(data.fullName)))
+      .replace(/\{\{DOCUMENTO\}\}/g, this.escapeHtml(data.documento))
+      .replace(/\{\{EVENT_NAME\}\}/g, this.escapeHtml(eventName))
+      .replace(/\{\{EVENT_DATE\}\}/g, this.escapeHtml(eventDate))
+      .replace(/\{\{EVENT_LOCATION\}\}/g, this.escapeHtml(eventLocation));
+
+    if (data.role === "ponente" && data.ponente) {
+      const autor2Block =
+        data.ponente.autor2 && data.ponente.documento2
+          ? `<div class="coautor-block">Coautor: <span class="coautor-name">${this.escapeHtml(this.upper(data.ponente.autor2))}</span> &mdash; ${this.escapeHtml(data.ponente.documento2)}</div>`
+          : "";
+
+      html = html
+        .replace(/\{\{AUTOR2_BLOCK\}\}/g, autor2Block)
+        .replace(
+          /\{\{TITULO_PONENCIA\}\}/g,
+          this.escapeHtml(this.upper(data.ponente.tituloPonencia)),
+        )
+        .replace(
+          /\{\{SEMILLERO\}\}/g,
+          this.escapeHtml(this.upper(data.ponente.semillero ?? "NO REGISTRA")),
+        );
+    }
+
+    if (data.role === "evaluador" && data.evaluador) {
+      const items = data.evaluador.ponencias
+        .slice(0, 10)
+        .map((p) => `<li>${this.escapeHtml(this.upper(p))}</li>`)
+        .join("\n");
+
+      html = html
+        .replace(
+          /\{\{UNIVERSIDAD\}\}/g,
+          this.escapeHtml(this.upper(data.evaluador.universidad)),
+        )
+        .replace(/\{\{PONENCIAS_LIST\}\}/g, items);
+    }
+
+    return html;
+  }
+
+  private getHtmlTemplatePath(role: CertificateRole): string {
+    const configuredDir = process.env.CERTIFICATE_TEMPLATE_DIR;
+    const candidates = [
+      configuredDir ? resolve(configuredDir) : null,
+      resolve(process.cwd(), "templates", "certificates"),
+    ].filter((value): value is string => Boolean(value));
+
+    const filename = `${role}.html`;
+    const found = candidates.map((dir) => join(dir, filename)).find((p) => existsSync(p));
+
+    if (!found) {
+      throw new BadRequestException(`No se encontro la plantilla HTML ${filename}.`);
+    }
+
+    return found;
+  }
+
+  private async convertHtmlToPdf(html: string, pdfPath: string): Promise<void> {
+    const { default: puppeteer } = await import("puppeteer");
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+
+    try {
+      const page = await browser.newPage();
+      await page.setContent(html, { waitUntil: "load" });
+      await page.pdf({
+        path: pdfPath,
+        width: "1190px",
+        height: "842px",
+        printBackground: true,
+      });
+    } finally {
+      await browser.close();
+    }
   }
 
   private findLibreOfficePath() {
@@ -628,6 +730,15 @@ export class CertificatesService {
 
   private escapeRegExp(value: string) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  private escapeHtml(value: string): string {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   private toPowerShellString(value: string) {

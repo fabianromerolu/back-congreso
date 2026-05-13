@@ -12,6 +12,7 @@
     "multer": "^2.0.2",
     "nodemailer": "^8.0.7",
     "prisma": "^6.19.2",
+    "puppeteer": "^24.43.1",
     "typescript": "^5.9.3"
   },
   "devDependencies": {
