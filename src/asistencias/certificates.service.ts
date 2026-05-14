@@ -528,7 +528,16 @@ export class CertificatesService {
 
   private async convertDocxViaMammoth(docxPath: string, pdfPath: string): Promise<void> {
     const { default: mammoth } = await import("mammoth");
-    const result = await mammoth.convertToHtml({ path: docxPath });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mammothAny = mammoth as any;
+    const result: { value: string } = await mammothAny.convertToHtml({
+      path: docxPath,
+      convertImage: mammothAny.images.imgElement(async (image: any) => {
+        const imageBuffer = await image.read("base64");
+        return { src: `data:${image.contentType};base64,${imageBuffer}` };
+      }),
+    });
 
     const html = `<!DOCTYPE html>
 <html lang="es">
@@ -537,16 +546,74 @@ export class CertificatesService {
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body { font-family: Arial, sans-serif; background: #fff; }
-      img { max-width: 100%; height: auto; }
-      table { width: 100%; border-collapse: collapse; }
-      td, th { padding: 4px 8px; vertical-align: top; }
-      p { margin: 4px 0; }
+      p { margin: 3px 0; }
+      img { max-width: 100%; height: auto; vertical-align: middle; }
+      table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+      td { padding: 4px 8px; vertical-align: top; word-wrap: break-word; overflow-wrap: break-word; }
     </style>
   </head>
   <body>${result.value}</body>
 </html>`;
 
-    await this.convertHtmlToPdf(html, pdfPath);
+    const { default: puppeteer } = await import("puppeteer");
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+
+    try {
+      const page = await browser.newPage();
+      await page.setContent(html, { waitUntil: "load" });
+
+      await page.evaluate(() => {
+        // 1. Centrar párrafos que contienen imágenes (logos)
+        document.querySelectorAll("p").forEach((el) => {
+          const p = el as HTMLElement;
+          if (p.querySelector("img")) {
+            p.style.display = "flex";
+            p.style.justifyContent = "center";
+            p.style.alignItems = "center";
+            p.style.gap = "24px";
+            p.style.flexWrap = "wrap";
+            p.style.textAlign = "center";
+          }
+        });
+
+        // 2. Centrar celdas de tabla que contengan imágenes (tabla de logos)
+        document.querySelectorAll("td, th").forEach((el) => {
+          const cell = el as HTMLElement;
+          if (cell.querySelector("img")) {
+            cell.style.textAlign = "center";
+          }
+        });
+
+        // 3. Tabla de firmas: última tabla sin imágenes → columnas iguales con alineación correcta
+        const tables = Array.from(document.querySelectorAll("table"));
+        const signatureTable = [...tables].reverse().find((t) => !t.querySelector("img"));
+        if (signatureTable) {
+          const rows = signatureTable.querySelectorAll("tr");
+          rows.forEach((row) => {
+            const cells = Array.from(row.querySelectorAll("td")) as HTMLElement[];
+            cells.forEach((td, idx) => {
+              td.style.width = `${Math.floor(100 / cells.length)}%`;
+              td.style.verticalAlign = "top";
+              if (cells.length === 2) {
+                td.style.textAlign = idx === 0 ? "left" : "right";
+              }
+            });
+          });
+        }
+      });
+
+      await page.pdf({
+        path: pdfPath,
+        width: "1190px",
+        height: "842px",
+        printBackground: true,
+      });
+    } finally {
+      await browser.close();
+    }
   }
 
   private buildHtmlCertificate(data: CertificateTemplateData): string {
