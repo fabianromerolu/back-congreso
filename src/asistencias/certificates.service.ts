@@ -47,8 +47,9 @@ const TEMPLATE_FILENAMES: Record<CertificateRole, string> = {
   ponente: "PLANTILLA PONENTE.docx",
 };
 
-const EVALUADOR_SAMPLE_BLOCK =
-  /<w:p[^>]*>[\s\S]*?LA EVOLUCI[\s\S]*?DERECHOS HUMANOS[\s\S]*?<\/w:p>/;
+// Marcadores de texto que delimitan el bloque de ponencias de muestra en la plantilla evaluador
+const EVALUADOR_FIRST_SAMPLE = "LA EVOLUCI";
+const EVALUADOR_LAST_SAMPLE = "DERECHOS HUMANOS";
 
 @Injectable()
 export class CertificatesService {
@@ -375,14 +376,43 @@ export class CertificatesService {
       throw new BadRequestException("Faltan datos de evaluador para el certificado.");
     }
 
-    return this.replaceSequence(xml, [
+    const filled = this.replaceSequence(xml, [
       ["XXXXXXXXXXXXXX", this.upper(data.fullName)],
       ["XXXXXXX", data.documento],
       ["Universidad XXXXXXX", this.upper(data.evaluador.universidad)],
-    ]).replace(
-      EVALUADOR_SAMPLE_BLOCK,
+    ]);
+
+    return this.replaceEvaluadorSampleBlock(
+      filled,
       this.buildEvaluatorTitleParagraphs(data.evaluador.ponencias),
     );
+  }
+
+  private replaceEvaluadorSampleBlock(xml: string, newParagraphs: string): string {
+    const firstSampleIdx = xml.indexOf(EVALUADOR_FIRST_SAMPLE);
+    const lastSampleIdx = xml.indexOf(EVALUADOR_LAST_SAMPLE);
+
+    if (firstSampleIdx === -1 || lastSampleIdx === -1) {
+      throw new BadRequestException(
+        "No se encontro el bloque de ponencias de muestra en la plantilla de evaluador.",
+      );
+    }
+
+    // lastIndexOf("<w:p>") and lastIndexOf("<w:p ") to find the actual <w:p> opener
+    // (NOT <w:pPr> or <w:pStyle> which also start with "<w:p")
+    const startA = xml.lastIndexOf("<w:p>", firstSampleIdx);
+    const startB = xml.lastIndexOf("<w:p ", firstSampleIdx);
+    const blockStart = Math.max(startA, startB);
+
+    const blockEnd = xml.indexOf("</w:p>", lastSampleIdx) + "</w:p>".length;
+
+    if (blockStart === -1 || blockEnd <= blockStart) {
+      throw new BadRequestException(
+        "No se pudo determinar los limites del bloque de ponencias en la plantilla.",
+      );
+    }
+
+    return xml.substring(0, blockStart) + newParagraphs + xml.substring(blockEnd);
   }
 
   private replaceSequence(xml: string, replacements: Array<[string, string]>) {
@@ -539,6 +569,9 @@ export class CertificatesService {
       }),
     });
 
+    // Preprocesar: párrafos con 20+ espacios → 2 columnas (área de firmas)
+    const fixedBody = this.splitSpaceAlignedParagraphs(result.value);
+
     const html = `<!DOCTYPE html>
 <html lang="es">
   <head>
@@ -552,7 +585,7 @@ export class CertificatesService {
       td { padding: 4px 8px; vertical-align: top; word-wrap: break-word; overflow-wrap: break-word; }
     </style>
   </head>
-  <body>${result.value}</body>
+  <body>${fixedBody}</body>
 </html>`;
 
     const { default: puppeteer } = await import("puppeteer");
@@ -566,43 +599,40 @@ export class CertificatesService {
       await page.setContent(html, { waitUntil: "load" });
 
       await page.evaluate(() => {
-        // 1. Centrar párrafos que contienen imágenes (logos)
+        // Primer párrafo con 2+ imágenes → logos → centrar (extraer imágenes limpiamente)
+        // Párrafos posteriores con 2+ imágenes → firmas → separar izquierda/derecha
+        let logosDone = false;
+
         document.querySelectorAll("p").forEach((el) => {
           const p = el as HTMLElement;
-          if (p.querySelector("img")) {
-            p.style.display = "flex";
-            p.style.justifyContent = "center";
-            p.style.alignItems = "center";
-            p.style.gap = "24px";
-            p.style.flexWrap = "wrap";
-            p.style.textAlign = "center";
+          const images = p.querySelectorAll("img");
+          if (images.length < 2) return;
+
+          if (!logosDone) {
+            // Extraer solo las imágenes (sin nodos de texto ni strong wrappers)
+            // para evitar que el espacio en blanco entre ellas descuadre el centrado
+            const imgElements = Array.from(images) as HTMLElement[];
+            const container = document.createElement("div");
+            container.style.cssText =
+              "display:flex;justify-content:center;align-items:center;gap:40px;margin:8px 0;";
+            imgElements.forEach((img) => container.appendChild(img));
+            p.replaceWith(container);
+            logosDone = true;
+          } else {
+            const img1 = images[0] as HTMLElement;
+            const img2 = images[1] as HTMLElement;
+            const container = document.createElement("div");
+            container.style.cssText =
+              "display:flex;justify-content:space-between;width:100%;margin:6px 0;";
+            const leftDiv = document.createElement("div");
+            const rightDiv = document.createElement("div");
+            leftDiv.appendChild(img1);
+            rightDiv.appendChild(img2);
+            container.appendChild(leftDiv);
+            container.appendChild(rightDiv);
+            p.replaceWith(container);
           }
         });
-
-        // 2. Centrar celdas de tabla que contengan imágenes (tabla de logos)
-        document.querySelectorAll("td, th").forEach((el) => {
-          const cell = el as HTMLElement;
-          if (cell.querySelector("img")) {
-            cell.style.textAlign = "center";
-          }
-        });
-
-        // 3. Tabla de firmas: última tabla sin imágenes → columnas iguales con alineación correcta
-        const tables = Array.from(document.querySelectorAll("table"));
-        const signatureTable = [...tables].reverse().find((t) => !t.querySelector("img"));
-        if (signatureTable) {
-          const rows = signatureTable.querySelectorAll("tr");
-          rows.forEach((row) => {
-            const cells = Array.from(row.querySelectorAll("td")) as HTMLElement[];
-            cells.forEach((td, idx) => {
-              td.style.width = `${Math.floor(100 / cells.length)}%`;
-              td.style.verticalAlign = "top";
-              if (cells.length === 2) {
-                td.style.textAlign = idx === 0 ? "left" : "right";
-              }
-            });
-          });
-        }
       });
 
       await page.pdf({
@@ -614,6 +644,51 @@ export class CertificatesService {
     } finally {
       await browser.close();
     }
+  }
+
+  private splitSpaceAlignedParagraphs(html: string): string {
+    return html.replace(/<p(\b[^>]*)>([\s\S]*?)<\/p>/g, (match, _attrs, content) => {
+      const textOnly = content.replace(/<[^>]+>/g, "");
+      // Detectar párrafos con 20+ espacios consecutivos (columnas alineadas por espacios en Word)
+      if (!/\S\s{20,}\S/.test(textOnly)) return match;
+
+      // Si el contenido está envuelto en un único tag (<strong>, <em>, etc.), preservarlo en ambas partes
+      const wrapperMatch = content.match(/^(<(\w+)[^>]*)>([\s\S]*)<\/\2>$/);
+      let leftHtml: string;
+      let rightHtml: string;
+
+      if (wrapperMatch) {
+        const openTag = `${wrapperMatch[1]}>`;
+        const tagName = wrapperMatch[2] as string;
+        const closeTag = `</${tagName}>`;
+        // filter(Boolean) elimina partes vacías creadas por espacios iniciales/finales >= 20
+        const parts = (wrapperMatch[3] as string)
+          .split(/\s{20,}/)
+          .map((p) => p.trim())
+          .filter(Boolean);
+        if (parts.length < 2) return match;
+        leftHtml = `${openTag}${parts[0]}${closeTag}`;
+        rightHtml = `${openTag}${parts[1]}${closeTag}`;
+      } else {
+        const parts = content
+          .split(/\s{20,}/)
+          .map((p) => p.trim())
+          .filter(Boolean);
+        if (parts.length < 2) return match;
+        leftHtml = parts[0];
+        rightHtml = parts[1];
+      }
+
+      if (!leftHtml || !rightHtml) return match;
+
+      return [
+        `<div style="display:flex;justify-content:space-between;align-items:flex-start;`,
+        `width:100%;margin:3px 0">`,
+        `<div style="text-align:left">${leftHtml}</div>`,
+        `<div style="text-align:right">${rightHtml}</div>`,
+        `</div>`,
+      ].join("");
+    });
   }
 
   private buildHtmlCertificate(data: CertificateTemplateData): string {

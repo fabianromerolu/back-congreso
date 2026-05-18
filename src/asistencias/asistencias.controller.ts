@@ -34,6 +34,20 @@ export class AsistenciasController {
     file.stream.pipe(res);
   }
 
+  @Get("certificados/:id/ver")
+  @Header("Content-Type", "application/pdf")
+  async previewCertificate(@Param("id") id: string, @Res() res: Response) {
+    const file = await this.service.getCertificateDownload(id);
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${file.filename.replace(/"/g, "")}"`,
+    );
+
+    file.stream.pipe(res);
+  }
+
   @Post(":role")
   register(@Param("role") role: string, @Body() dto: CreateAsistenciaDto) {
     dto.role = role;

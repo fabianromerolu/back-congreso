@@ -334,6 +334,43 @@ export class AsistenciasService {
     };
   }
 
+  async updateAttendanceRecord(
+    id: string,
+    data: {
+      nombres?: string;
+      apellidos?: string;
+      email?: string;
+      telefono?: string;
+      ciudad?: string;
+      institucion?: string;
+      semillero?: string | null;
+      tituloPonencia?: string | null;
+    },
+  ) {
+    const record = await this.findAttendanceRecord(id);
+    const updateData: Prisma.AsistenciaRegistroUpdateInput = {};
+
+    if (data.nombres !== undefined) updateData.nombres = normalizeToStore(data.nombres);
+    if (data.apellidos !== undefined) updateData.apellidos = normalizeToStore(data.apellidos);
+    if (data.email !== undefined) updateData.email = data.email.toLowerCase().trim();
+    if (data.telefono !== undefined) updateData.telefono = data.telefono.trim();
+    if (data.ciudad !== undefined) updateData.ciudad = normalizeToStore(data.ciudad);
+    if (data.institucion !== undefined) updateData.institucion = normalizeToStore(data.institucion);
+    if ("semillero" in data) updateData.semillero = data.semillero ?? null;
+    if ("tituloPonencia" in data) updateData.tituloPonencia = data.tituloPonencia ?? null;
+
+    const updated = await this.prisma.asistenciaRegistro.update({
+      where: { id: record.id },
+      data: updateData,
+    });
+
+    return {
+      message: "Registro de asistencia actualizado correctamente.",
+      record: updated,
+      registro: updated,
+    };
+  }
+
   async clearAllAttendanceRecords() {
     const records = await this.prisma.asistenciaRegistro.findMany();
     let deletedFiles = 0;

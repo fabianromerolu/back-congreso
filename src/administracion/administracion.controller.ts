@@ -174,6 +174,24 @@ export class AdministracionController {
     return this.asistenciasService.deleteAttendanceRecord(id);
   }
 
+  @Patch("asistencias/registros/:id")
+  updateAttendanceRecord(
+    @Param("id") id: string,
+    @Body()
+    body: {
+      nombres?: string;
+      apellidos?: string;
+      email?: string;
+      telefono?: string;
+      ciudad?: string;
+      institucion?: string;
+      semillero?: string | null;
+      tituloPonencia?: string | null;
+    },
+  ) {
+    return this.asistenciasService.updateAttendanceRecord(id, body);
+  }
+
   @Delete("asistencias/certificados")
   clearGeneratedCertificates() {
     return this.asistenciasService.clearGeneratedCertificates();
