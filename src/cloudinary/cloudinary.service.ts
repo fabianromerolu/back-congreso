@@ -16,8 +16,8 @@ export class CloudinaryService {
   uploadPdf(buffer: Buffer, filename: string, folder: string) {
     return this.uploadFromBuffer(buffer, {
       folder,
-      public_id: this.safePublicId(filename),
-      resource_type: "raw", // ✅ PDFs van como raw
+      public_id: this.safePublicId(filename) + ".pdf",
+      resource_type: "raw",
     });
   }
 

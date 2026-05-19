@@ -1,5 +1,5 @@
 // src/asistencias/asistencias.controller.ts
-import { Body, Controller, Get, Param, Post, Query, Res } from "@nestjs/common";
+import { Body, Controller, Get, InternalServerErrorException, Param, Post, Query, Res } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
 import { AsistenciasService } from "./asistencias.service";
@@ -24,15 +24,16 @@ export class AsistenciasController {
   async downloadCertificate(@Param("id") id: string, @Res() res: Response) {
     const file = await this.service.getCertificateDownload(id);
 
-    if (file.type === "remote") {
-      return res.redirect(file.url);
-    }
-
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="${file.filename.replace(/"/g, "")}"`,
     );
+
+    if (file.type === "remote") {
+      return this.proxyRemotePdf(file.url, res);
+    }
+
     file.stream.pipe(res);
   }
 
@@ -40,15 +41,16 @@ export class AsistenciasController {
   async previewCertificate(@Param("id") id: string, @Res() res: Response) {
     const file = await this.service.getCertificateDownload(id);
 
-    if (file.type === "remote") {
-      return res.redirect(file.url);
-    }
-
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
       `inline; filename="${file.filename.replace(/"/g, "")}"`,
     );
+
+    if (file.type === "remote") {
+      return this.proxyRemotePdf(file.url, res);
+    }
+
     file.stream.pipe(res);
   }
 
@@ -56,5 +58,19 @@ export class AsistenciasController {
   register(@Param("role") role: string, @Body() dto: CreateAsistenciaDto) {
     dto.role = role;
     return this.service.register(dto);
+  }
+
+  private async proxyRemotePdf(url: string, res: Response) {
+    const remote = await fetch(url).catch(() => null);
+
+    if (!remote?.ok) {
+      throw new InternalServerErrorException(
+        "No se pudo obtener el PDF desde el almacenamiento remoto.",
+      );
+    }
+
+    const buffer = Buffer.from(await remote.arrayBuffer());
+    res.setHeader("Content-Length", String(buffer.length));
+    res.end(buffer);
   }
 }

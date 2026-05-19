@@ -98,7 +98,7 @@ function uploadPdfBuffer(
     const stream = cloudinary.uploader.upload_stream(
       {
         folder,
-        public_id: safePublicId(publicFilename),
+        public_id: safePublicId(publicFilename) + ".pdf",
         resource_type: "raw",
       },
       (err, result) => {
