@@ -1,5 +1,5 @@
 // src/asistencias/asistencias.controller.ts
-import { Body, Controller, Get, Header, Param, Post, Query, Res } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, Res } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
 import { AsistenciasService } from "./asistencias.service";
@@ -21,30 +21,34 @@ export class AsistenciasController {
   }
 
   @Get("certificados/:id/descargar")
-  @Header("Content-Type", "application/pdf")
   async downloadCertificate(@Param("id") id: string, @Res() res: Response) {
     const file = await this.service.getCertificateDownload(id);
+
+    if (file.type === "remote") {
+      return res.redirect(file.url);
+    }
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="${file.filename.replace(/"/g, "")}"`,
     );
-
     file.stream.pipe(res);
   }
 
   @Get("certificados/:id/ver")
-  @Header("Content-Type", "application/pdf")
   async previewCertificate(@Param("id") id: string, @Res() res: Response) {
     const file = await this.service.getCertificateDownload(id);
+
+    if (file.type === "remote") {
+      return res.redirect(file.url);
+    }
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
       `inline; filename="${file.filename.replace(/"/g, "")}"`,
     );
-
     file.stream.pipe(res);
   }
 

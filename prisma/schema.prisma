@@ -241,6 +241,8 @@ model AsistenciaRegistro {
   certificateSentAt    DateTime?
   certificateError     String?
   linkedRegistrationId String?
+  certificateUrl       String?
+  certificatePublicId  String?
   createdAt            DateTime  @default(now())
 
   @@index([role])

@@ -6,6 +6,7 @@ import { mkdir, readFile, unlink, writeFile } from "fs/promises";
 import JSZip from "jszip";
 import { basename, dirname, join, resolve } from "path";
 import { promisify } from "util";
+import { CloudinaryService } from "../cloudinary/cloudinary.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { areEquivalent } from "../common/utils/normalizer";
 
@@ -41,6 +42,10 @@ type GeneratedCertificate = {
   filename: string;
 };
 
+export type CertificateAccess =
+  | { type: "remote"; url: string; filename: string }
+  | { type: "local"; stream: ReturnType<typeof createReadStream>; path: string; filename: string };
+
 const TEMPLATE_FILENAMES: Record<CertificateRole, string> = {
   asistente: "PLANTILLA ASISTENTE.docx",
   evaluador: "PLANTILLA EVALUADOR.docx",
@@ -53,7 +58,10 @@ const EVALUADOR_LAST_SAMPLE = "DERECHOS HUMANOS";
 
 @Injectable()
 export class CertificatesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinary: CloudinaryService,
+  ) {}
 
   async generateCertificate(record: AsistenciaRegistro) {
     const data = await this.buildTemplateData(record);
@@ -83,10 +91,31 @@ export class CertificatesService {
     await writeFile(docxPath, generatedDocx);
     await this.convertDocxToPdf(docxPath, pdfPath);
 
+    let certificateUrl: string | null = null;
+    let certificatePublicId: string | null = null;
+
+    try {
+      const pdfBuffer = await readFile(pdfPath);
+      const upload = await this.cloudinary.uploadPdf(
+        pdfBuffer,
+        this.getPublicFilename(record),
+        "congreso/certificados",
+      );
+      certificateUrl = upload.secure_url;
+      certificatePublicId = upload.public_id;
+    } catch (uploadError) {
+      console.error(
+        `[CertificatesService] Cloudinary upload failed for record ${record.id}:`,
+        uploadError instanceof Error ? uploadError.message : uploadError,
+      );
+    }
+
     return {
       docxPath,
       pdfPath,
       linkedRegistrationId: data.linkedRegistrationId,
+      certificateUrl,
+      certificatePublicId,
     };
   }
 
@@ -118,6 +147,19 @@ export class CertificatesService {
       if (!this.isCertificateRole(record.role)) continue;
       if (record.certificateStatus !== "sent") continue;
 
+      // Prioridad 1: URL en Cloudinary (disponible en producción sin disco)
+      if (record.certificateUrl) {
+        certificates.push({
+          role: record.role,
+          fullName: this.fullName(record.nombres, record.apellidos),
+          generatedAt: record.certificateSentAt,
+          downloadUrl: record.certificateUrl,
+          filename: this.getPublicFilename(record),
+        });
+        continue;
+      }
+
+      // Fallback: archivo local en disco
       const pdfPath = await this.getCertificatePdfPath(record);
       if (!existsSync(pdfPath)) continue;
 
@@ -166,6 +208,34 @@ export class CertificatesService {
         certificateStatus: record.certificateStatus,
       })),
     };
+  }
+
+  async getCertificateAccess(recordId: string): Promise<CertificateAccess> {
+    const record = await this.prisma.asistenciaRegistro.findUnique({
+      where: { id: recordId },
+    });
+
+    if (!record) {
+      throw new NotFoundException("Certificado no encontrado.");
+    }
+
+    if (record.certificateStatus !== "sent") {
+      throw new BadRequestException("El certificado aun no ha sido generado.");
+    }
+
+    const filename = this.getPublicFilename(record);
+
+    if (record.certificateUrl) {
+      return { type: "remote", url: record.certificateUrl, filename };
+    }
+
+    const pdfPath = await this.getCertificatePdfPath(record);
+
+    if (!existsSync(pdfPath)) {
+      throw new NotFoundException("El archivo PDF del certificado no esta disponible.");
+    }
+
+    return { type: "local", stream: createReadStream(pdfPath), path: pdfPath, filename };
   }
 
   async getDownloadFile(recordId: string) {
@@ -858,7 +928,7 @@ export class CertificatesService {
     return String(value ?? "").trim().replace(/\s+/g, " ").toUpperCase();
   }
 
-  private getPublicFilename(record: AsistenciaRegistro) {
+  getPublicFilename(record: AsistenciaRegistro) {
     const name = this.slugify(this.fullName(record.nombres, record.apellidos));
     return `certificado-${record.role}-${name || record.documento}.pdf`;
   }
@@ -866,7 +936,7 @@ export class CertificatesService {
   private slugify(value: string) {
     return String(value ?? "")
       .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[̀-ͯ]/g, "")
       .replace(/[^a-zA-Z0-9]+/g, "-")
       .replace(/^-+|-+$/g, "")
       .toLowerCase();

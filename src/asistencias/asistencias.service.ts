@@ -216,6 +216,8 @@ export class AsistenciasService {
             certificateError: emailResult?.skipped ? emailResult.message : null,
             linkedRegistrationId:
               result.linkedRegistrationId ?? record.linkedRegistrationId,
+            certificateUrl: result.certificateUrl ?? null,
+            certificatePublicId: result.certificatePublicId ?? null,
           },
         });
 
@@ -404,7 +406,7 @@ export class AsistenciasService {
   }
 
   getCertificateDownload(recordId: string) {
-    return this.certificates.getDownloadFile(recordId);
+    return this.certificates.getCertificateAccess(recordId);
   }
 
   private async sendGeneratedCertificateEmail(record: AsistenciaRegistro) {
@@ -419,6 +421,8 @@ export class AsistenciasService {
         certificateStatus: "pending",
         certificateSentAt: null,
         certificateError: null,
+        certificateUrl: null,
+        certificatePublicId: null,
       },
     });
   }
