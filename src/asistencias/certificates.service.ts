@@ -147,13 +147,13 @@ export class CertificatesService {
       if (!this.isCertificateRole(record.role)) continue;
       if (record.certificateStatus !== "sent") continue;
 
-      // Prioridad 1: URL en Cloudinary (disponible en producción sin disco)
+      // Si tiene URL remota, el endpoint /descargar la proxyea con headers correctos
       if (record.certificateUrl) {
         certificates.push({
           role: record.role,
           fullName: this.fullName(record.nombres, record.apellidos),
           generatedAt: record.certificateSentAt,
-          downloadUrl: record.certificateUrl,
+          downloadUrl: `/asistencias/certificados/${record.id}/descargar`,
           filename: this.getPublicFilename(record),
         });
         continue;
