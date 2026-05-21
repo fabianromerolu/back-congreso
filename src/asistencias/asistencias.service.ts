@@ -1,13 +1,15 @@
 // src/asistencias/asistencias.service.ts
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma, type AsistenciaRegistro } from "@prisma/client";
-import { areEquivalent, normalizeToStore } from "../common/utils/normalizer";
+import { areEquivalent, normalizeComparable, normalizeToStore } from "../common/utils/normalizer";
 import { PrismaService } from "../prisma/prisma.service";
 import { CertificateEmailService } from "./certificate-email.service";
 import { CertificatesService } from "./certificates.service";
 import { CreateAsistenciaDto } from "./dto/create-asistencia.dto";
 
 type AttendanceRole = "ponente" | "asistente" | "evaluador";
+
+const MAX_STORED_PONENTE_TITLES = 10;
 
 type SendCertificatesOptions = {
   pendingOnly?: boolean;
@@ -59,6 +61,10 @@ export class AsistenciasService {
     );
 
     if (existing && !options.upsert) {
+      if (cleanDto.role === "ponente" && cleanDto.appendPonencias) {
+        return this.appendPonenciasToExisting(existing, cleanDto);
+      }
+
       throw new BadRequestException(
         "Ya existe un registro de asistencia para este documento y rol.",
       );
@@ -521,10 +527,61 @@ export class AsistenciasService {
       ciudad: normalizeToStore(dto.ciudad) ?? "",
       semillero: normalizeToStore(dto.semillero) ?? "",
       tituloPonencia: normalizeToStore(dto.tituloPonencia) ?? "",
+      appendPonencias: Boolean(dto.appendPonencias),
+      ponenciasAdicionales: this.cleanTitles(dto.ponenciasAdicionales ?? []),
       source: dto.source ?? "direct",
       ponenciaIds: this.cleanIds(dto.ponenciaIds ?? []),
       ponenciasEvaluadas: this.cleanTitles(dto.ponenciasEvaluadas ?? []),
     };
+  }
+
+  private async appendPonenciasToExisting(
+    existing: AsistenciaRegistro,
+    dto: ReturnType<AsistenciasService["normalizeAttendanceInput"]>,
+  ) {
+    const currentTitles = this.splitPonenteTitles(existing.tituloPonencia);
+    const incomingTitles = this.collectPonenteTitles([
+      dto.tituloPonencia,
+      ...dto.ponenciasAdicionales,
+    ]);
+
+    if (!incomingTitles.length) {
+      throw new BadRequestException(
+        "Debes indicar al menos una ponencia adicional para anexar al registro.",
+      );
+    }
+
+    const currentKeys = new Set(currentTitles.map((title) => normalizeComparable(title)));
+    const hasNewTitle = incomingTitles.some(
+      (title) => !currentKeys.has(normalizeComparable(title)),
+    );
+
+    if (!hasNewTitle) {
+      throw new BadRequestException(
+        "La ponencia indicada ya esta registrada para este ponente.",
+      );
+    }
+
+    const mergedTitle = this.mergePonenteTitles(currentTitles, incomingTitles).join(" Y ");
+
+    await this.certificates.deleteGeneratedFiles(existing).catch((error) => {
+      console.error(
+        `[AsistenciasService] No se pudieron borrar certificados locales del registro ${existing.id}:`,
+        error instanceof Error ? error.message : error,
+      );
+    });
+
+    return this.prisma.asistenciaRegistro.update({
+      where: { id: existing.id },
+      data: {
+        tituloPonencia: mergedTitle,
+        certificateStatus: "pending",
+        certificateSentAt: null,
+        certificateError: null,
+        certificateUrl: null,
+        certificatePublicId: null,
+      },
+    });
   }
 
   private cleanIds(values: string[]) {
@@ -540,6 +597,48 @@ export class AsistenciasService {
       .filter(Boolean)
       .filter((value, index, arr) => arr.indexOf(value) === index)
       .slice(0, 9);
+  }
+
+  private splitPonenteTitles(value?: string | null) {
+    const clean = normalizeToStore(value) ?? "";
+    if (!clean) return [];
+
+    return clean
+      .split(/\s+Y\s+/i)
+      .map((title) => normalizeToStore(title) ?? "")
+      .filter(Boolean);
+  }
+
+  private collectPonenteTitles(values: string[]) {
+    const seen = new Set<string>();
+    const titles: string[] = [];
+
+    values.forEach((value) => {
+      this.splitPonenteTitles(value).forEach((title) => {
+        const key = normalizeComparable(title);
+        if (!key || seen.has(key)) return;
+        seen.add(key);
+        titles.push(title);
+      });
+    });
+
+    return titles.slice(0, MAX_STORED_PONENTE_TITLES);
+  }
+
+  private mergePonenteTitles(currentTitles: string[], incomingTitles: string[]) {
+    const seen = new Set<string>();
+    const merged: string[] = [];
+
+    [...currentTitles, ...incomingTitles].forEach((title) => {
+      const clean = normalizeToStore(title) ?? "";
+      const key = normalizeComparable(clean);
+      if (!key || seen.has(key)) return;
+
+      seen.add(key);
+      merged.push(clean);
+    });
+
+    return merged.slice(0, MAX_STORED_PONENTE_TITLES);
   }
 
   private serializeCertificateRecord(

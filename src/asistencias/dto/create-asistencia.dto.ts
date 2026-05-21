@@ -1,6 +1,7 @@
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsIn,
   IsNotEmpty,
   IsOptional,
@@ -75,6 +76,16 @@ export class CreateAsistenciaDto {
   @IsOptional()
   @IsString()
   tituloPonencia?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  appendPonencias?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
+  ponenciasAdicionales?: string[];
 
   @IsOptional()
   @IsArray()
