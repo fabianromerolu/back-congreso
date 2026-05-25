@@ -407,30 +407,6 @@ export class AsistenciasService {
     });
   }
 
-  async regenerateCertificateForDownload(recordId: string) {
-    const record = await this.findAttendanceRecord(recordId);
-
-    if (record.certificateStatus !== "sent") {
-      throw new BadRequestException("El certificado aun no ha sido generado.");
-    }
-
-    const result = await this.certificates.generateCertificate(record);
-
-    await this.prisma.asistenciaRegistro.update({
-      where: { id: record.id },
-      data: {
-        certificateStatus: "sent",
-        certificateSentAt: record.certificateSentAt ?? new Date(),
-        certificateError: null,
-        linkedRegistrationId: result.linkedRegistrationId ?? record.linkedRegistrationId,
-        certificateUrl: result.certificateUrl ?? record.certificateUrl,
-        certificatePublicId: result.certificatePublicId ?? record.certificatePublicId,
-      },
-    });
-
-    return this.certificates.getCertificateAccess(record.id);
-  }
-
   lookupCertificateByDocument(documento: string) {
     return this.certificates.lookupByDocument(documento);
   }

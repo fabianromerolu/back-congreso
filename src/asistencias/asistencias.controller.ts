@@ -51,18 +51,8 @@ export class AsistenciasController {
         return this.endPdfResponse(res, file, disposition, remoteBuffer);
       }
 
-      file = await this.service.regenerateCertificateForDownload(id);
-    }
-
-    if (file.type === "remote") {
-      const remoteBuffer = await this.fetchRemotePdf(file.url);
-
-      if (remoteBuffer) {
-        return this.endPdfResponse(res, file, disposition, remoteBuffer);
-      }
-
       throw new InternalServerErrorException(
-        "No se pudo obtener ni regenerar el PDF del certificado.",
+        "No se pudo obtener el PDF exacto desde el almacenamiento remoto.",
       );
     }
 
