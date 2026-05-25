@@ -225,17 +225,17 @@ export class CertificatesService {
 
     const filename = this.getPublicFilename(record);
 
+    const pdfPath = await this.getCertificatePdfPath(record);
+
+    if (existsSync(pdfPath)) {
+      return { type: "local", stream: createReadStream(pdfPath), path: pdfPath, filename };
+    }
+
     if (record.certificateUrl) {
       return { type: "remote", url: record.certificateUrl, filename };
     }
 
-    const pdfPath = await this.getCertificatePdfPath(record);
-
-    if (!existsSync(pdfPath)) {
-      throw new NotFoundException("El archivo PDF del certificado no esta disponible.");
-    }
-
-    return { type: "local", stream: createReadStream(pdfPath), path: pdfPath, filename };
+    throw new NotFoundException("El archivo PDF del certificado no esta disponible.");
   }
 
   async getDownloadFile(recordId: string) {

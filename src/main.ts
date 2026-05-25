@@ -10,6 +10,7 @@ async function bootstrap() {
   app.enableCors({
     origin: [
       "http://localhost:3000",
+      "http://localhost:3100",
       "https://ucc-monteria-congreso.vercel.app",
     ],
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
