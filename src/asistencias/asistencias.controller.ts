@@ -2,6 +2,7 @@
 import { Body, Controller, Get, InternalServerErrorException, Param, Post, Query, Res } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
+import type { CertificateAccess } from "./certificates.service";
 import { AsistenciasService } from "./asistencias.service";
 import { CreateAsistenciaDto } from "./dto/create-asistencia.dto";
 
@@ -22,36 +23,12 @@ export class AsistenciasController {
 
   @Get("certificados/:id/descargar")
   async downloadCertificate(@Param("id") id: string, @Res() res: Response) {
-    const file = await this.service.getCertificateDownload(id);
-
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${file.filename.replace(/"/g, "")}"`,
-    );
-
-    if (file.type === "remote") {
-      return this.proxyRemotePdf(file.url, res);
-    }
-
-    file.stream.pipe(res);
+    return this.sendCertificatePdf(id, res, "attachment");
   }
 
   @Get("certificados/:id/ver")
   async previewCertificate(@Param("id") id: string, @Res() res: Response) {
-    const file = await this.service.getCertificateDownload(id);
-
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader(
-      "Content-Disposition",
-      `inline; filename="${file.filename.replace(/"/g, "")}"`,
-    );
-
-    if (file.type === "remote") {
-      return this.proxyRemotePdf(file.url, res);
-    }
-
-    file.stream.pipe(res);
+    return this.sendCertificatePdf(id, res, "inline");
   }
 
   @Post(":role")
@@ -60,17 +37,69 @@ export class AsistenciasController {
     return this.service.register(dto);
   }
 
-  private async proxyRemotePdf(url: string, res: Response) {
-    const remote = await fetch(url).catch(() => null);
+  private async sendCertificatePdf(
+    id: string,
+    res: Response,
+    disposition: "attachment" | "inline",
+  ) {
+    let file = await this.service.getCertificateDownload(id);
 
-    if (!remote?.ok) {
+    if (file.type === "remote") {
+      const remoteBuffer = await this.fetchRemotePdf(file.url);
+
+      if (remoteBuffer) {
+        return this.endPdfResponse(res, file, disposition, remoteBuffer);
+      }
+
+      file = await this.service.regenerateCertificateForDownload(id);
+    }
+
+    if (file.type === "remote") {
+      const remoteBuffer = await this.fetchRemotePdf(file.url);
+
+      if (remoteBuffer) {
+        return this.endPdfResponse(res, file, disposition, remoteBuffer);
+      }
+
       throw new InternalServerErrorException(
-        "No se pudo obtener el PDF desde el almacenamiento remoto.",
+        "No se pudo obtener ni regenerar el PDF del certificado.",
       );
     }
 
-    const buffer = Buffer.from(await remote.arrayBuffer());
+    this.setPdfHeaders(res, file.filename, disposition);
+    file.stream.pipe(res);
+  }
+
+  private async fetchRemotePdf(url: string) {
+    const remote = await fetch(url).catch(() => null);
+
+    if (!remote?.ok) {
+      return null;
+    }
+
+    return Buffer.from(await remote.arrayBuffer());
+  }
+
+  private endPdfResponse(
+    res: Response,
+    file: CertificateAccess,
+    disposition: "attachment" | "inline",
+    buffer: Buffer,
+  ) {
+    this.setPdfHeaders(res, file.filename, disposition);
     res.setHeader("Content-Length", String(buffer.length));
     res.end(buffer);
+  }
+
+  private setPdfHeaders(
+    res: Response,
+    filename: string,
+    disposition: "attachment" | "inline",
+  ) {
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `${disposition}; filename="${filename.replace(/"/g, "")}"`,
+    );
   }
 }
